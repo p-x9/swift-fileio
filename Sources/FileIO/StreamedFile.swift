@@ -10,7 +10,7 @@ import Foundation
 
 public final class StreamedFile: FileIOProtocol {
     private let fileHandle: FileHandle
-    private var size: UInt64 {
+    public var size: UInt64 {
         return fileHandle.seekToEndOfFile()
     }
 
@@ -93,5 +93,71 @@ extension StreamedFile {
         try writeData(tailData, at: offset)
 
         try resize(newSize: Int(size) - length)
+    }
+}
+
+extension StreamedFile {
+    public typealias FileSlice = StreamedFileSlice
+
+    public func fileSlice(
+        offset: Int,
+        length: Int
+    ) throws -> FileSlice {
+        guard offset >= 0, length > 0, offset + length <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        return .init(
+            parent: self,
+            baseOffset: offset,
+            size: length,
+            isWritable: isWritable
+        )
+    }
+}
+
+public class StreamedFileSlice: FileIOSiliceProtocol {
+    let parent: StreamedFile
+
+    public private(set) var baseOffset: Int
+    public private(set) var size: Int
+
+    public let isWritable: Bool
+
+    init(
+        parent: StreamedFile,
+        baseOffset: Int,
+        size: Int,
+        isWritable: Bool
+    ) {
+        self.parent = parent
+        self.baseOffset = baseOffset
+        self.size = size
+        self.isWritable = isWritable
+    }
+}
+
+extension StreamedFileSlice {
+    public func readData(offset: Int, length: Int) throws -> Data {
+        try parent.readData(offset: baseOffset + offset, length: length)
+    }
+
+    public func writeData(_ data: Data, at offset: Int) throws {
+        try parent.writeData(data, at: baseOffset + offset)
+    }
+
+    public func sync() {
+        parent.sync()
+    }
+
+    public func resize(newSize: Int) throws {
+        try parent.resize(newSize: baseOffset + newSize)
+    }
+
+    public func insertData(_ data: Data, at offset: Int) throws {
+        try parent.insertData(data, at: baseOffset + offset)
+    }
+
+    public func delete(offset: Int, length: Int) throws {
+        try parent.delete(offset: baseOffset + offset, length: length)
     }
 }

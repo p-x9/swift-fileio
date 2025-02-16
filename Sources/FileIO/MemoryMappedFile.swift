@@ -11,7 +11,7 @@ import Foundation
 public final class MemoryMappedFile: FileIOProtocol {
     private var fileDescriptor: Int32
     public private(set) var ptr: UnsafeMutableRawPointer
-    private var size: Int
+    public private(set) var size: Int
 
     public let isWritable: Bool
 
@@ -145,5 +145,71 @@ extension MemoryMappedFile {
 
         let newSize = size - length
         try resize(newSize: newSize)
+    }
+}
+
+extension MemoryMappedFile {
+    public typealias FileSlice = MemoryMappedFileSlice
+
+    public func fileSlice(
+        offset: Int,
+        length: Int
+    ) throws -> FileSlice {
+        guard offset >= 0, length > 0, offset + length <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        return .init(
+            parent: self,
+            baseOffset: offset,
+            size: length,
+            isWritable: isWritable
+        )
+    }
+}
+
+public class MemoryMappedFileSlice: FileIOSiliceProtocol {
+    let parent: MemoryMappedFile
+
+    public private(set) var baseOffset: Int
+    public private(set) var size: Int
+
+    public let isWritable: Bool
+
+    init(
+        parent: MemoryMappedFile,
+        baseOffset: Int,
+        size: Int,
+        isWritable: Bool
+    ) {
+        self.parent = parent
+        self.baseOffset = baseOffset
+        self.size = size
+        self.isWritable = isWritable
+    }
+}
+
+extension MemoryMappedFileSlice {
+    public func readData(offset: Int, length: Int) throws -> Data {
+        try parent.readData(offset: baseOffset + offset, length: length)
+    }
+
+    public func writeData(_ data: Data, at offset: Int) throws {
+        try parent.writeData(data, at: baseOffset + offset)
+    }
+
+    public func sync() {
+        msync(parent.ptr.advanced(by: baseOffset), size, MS_SYNC)
+    }
+
+    public func resize(newSize: Int) throws {
+        try parent.resize(newSize: baseOffset + newSize)
+    }
+
+    public func insertData(_ data: Data, at offset: Int) throws {
+        try parent.insertData(data, at: baseOffset + offset)
+    }
+
+    public func delete(offset: Int, length: Int) throws {
+        try parent.delete(offset: baseOffset + offset, length: length)
     }
 }
