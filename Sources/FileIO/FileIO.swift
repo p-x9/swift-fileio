@@ -8,9 +8,7 @@ public enum FileIOError: Error {
     case notWritable
 }
 
-public protocol FileIOProtocol {
-    static func open(url: URL, isWritable: Bool) throws -> Self
-
+public protocol _FileIOProtocol {
     func readData(offset: Int, length: Int) throws -> Data
     func writeData(_ data: Data, at offset: Int) throws
 
@@ -19,4 +17,16 @@ public protocol FileIOProtocol {
     func resize(newSize: Int) throws
     func insertData(_ data: Data, at offset: Int) throws
     func delete(offset: Int, length: Int) throws
+}
+
+public protocol FileIOProtocol: _FileIOProtocol {
+    associatedtype FileSlice: FileIOSiliceProtocol
+
+    static func open(url: URL, isWritable: Bool) throws -> Self
+
+    func fileSlice(offset: Int, length: Int) throws -> FileSlice
+}
+
+public protocol FileIOSiliceProtocol: _FileIOProtocol {
+    var baseOffset: Int { get }
 }
