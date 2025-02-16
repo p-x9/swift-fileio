@@ -8,6 +8,23 @@
 
 import Foundation
 
+#if canImport(Darwin)
+import Darwin
+fileprivate let _open = Darwin.open(_:_:)
+#elseif canImport(Glibc)
+import Glibc
+fileprivate let _open = Glibc.open(_:_:)
+#elseif canImport(Musl)
+import Musl
+fileprivate let _open = Musl.open(_:_:)
+#elseif canImport(WASILibc)
+import WASILibc
+fileprivate let _open = WASILibc.open(_:_:)
+#elseif canImport(Android)
+import Android
+fileprivate let _open = Android.open(_:_:)
+#endif
+
 public final class MemoryMappedFile: FileIOProtocol {
     private var fileDescriptor: Int32
     public private(set) var ptr: UnsafeMutableRawPointer
@@ -37,7 +54,7 @@ public final class MemoryMappedFile: FileIOProtocol {
 
 extension MemoryMappedFile {
     public static func open(url: URL, isWritable: Bool) throws -> MemoryMappedFile {
-        let fd = Darwin.open(url.path, isWritable ? O_RDWR : O_RDONLY)
+        let fd = _open(url.path, isWritable ? O_RDWR : O_RDONLY)
         guard fd > 0 else {
             throw POSIXError(.init(rawValue: errno)!)
         }
