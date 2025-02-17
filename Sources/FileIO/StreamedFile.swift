@@ -97,6 +97,16 @@ extension StreamedFile {
 }
 
 extension StreamedFile {
+    public func read<T>(offset: Int) throws -> T {
+        let length = MemoryLayout<T>.size
+        let data = try readData(offset: offset, length: length)
+        return data.withUnsafeBytes {
+            $0.load(as: T.self)
+        }
+    }
+}
+
+extension StreamedFile {
     public typealias FileSlice = StreamedFileSlice
 
     public func fileSlice(
@@ -116,7 +126,7 @@ extension StreamedFile {
 }
 
 public class StreamedFileSlice: FileIOSiliceProtocol {
-    let parent: StreamedFile
+    public let parent: StreamedFile
 
     public private(set) var baseOffset: Int
     public private(set) var size: Int
@@ -159,5 +169,9 @@ extension StreamedFileSlice {
 
     public func delete(offset: Int, length: Int) throws {
         try parent.delete(offset: baseOffset + offset, length: length)
+    }
+
+    public func read<T>(offset: Int) throws -> T {
+        try parent.read(offset: baseOffset + offset)
     }
 }

@@ -166,6 +166,18 @@ extension MemoryMappedFile {
 }
 
 extension MemoryMappedFile {
+    public func read<T>(offset: Int) throws -> T {
+        let length = MemoryLayout<T>.size
+        guard offset + length <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        return ptr.advanced(by: offset)
+            .assumingMemoryBound(to: T.self)
+            .pointee
+    }
+}
+
+extension MemoryMappedFile {
     public typealias FileSlice = MemoryMappedFileSlice
 
     public func fileSlice(
@@ -185,7 +197,7 @@ extension MemoryMappedFile {
 }
 
 public class MemoryMappedFileSlice: FileIOSiliceProtocol {
-    let parent: MemoryMappedFile
+    public let parent: MemoryMappedFile
 
     public private(set) var baseOffset: Int
     public private(set) var size: Int
@@ -206,6 +218,10 @@ public class MemoryMappedFileSlice: FileIOSiliceProtocol {
 }
 
 extension MemoryMappedFileSlice {
+    public var ptr: UnsafeMutableRawPointer {
+        parent.ptr.advanced(by: baseOffset)
+    }
+
     public func readData(offset: Int, length: Int) throws -> Data {
         try parent.readData(offset: baseOffset + offset, length: length)
     }
@@ -228,5 +244,9 @@ extension MemoryMappedFileSlice {
 
     public func delete(offset: Int, length: Int) throws {
         try parent.delete(offset: baseOffset + offset, length: length)
+    }
+
+    public func read<T>(offset: Int) throws -> T {
+        try parent.read(offset: baseOffset + offset)
     }
 }

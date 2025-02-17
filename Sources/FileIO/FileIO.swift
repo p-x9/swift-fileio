@@ -17,6 +17,8 @@ public protocol _FileIOProtocol {
     func resize(newSize: Int) throws
     func insertData(_ data: Data, at offset: Int) throws
     func delete(offset: Int, length: Int) throws
+
+    func read<T>(offset: Int) throws -> T 
 }
 
 public protocol FileIOProtocol: _FileIOProtocol {
