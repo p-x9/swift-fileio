@@ -96,8 +96,9 @@ extension MemoryMappedFile {
         guard offset + data.count <= size else {
             throw FileIOError.offsetOutOfBounds
         }
-        _ = data.withUnsafeBytes { buffer in
+        data.withUnsafeBytes { buffer in
             memcpy(ptr.advanced(by: offset), buffer.baseAddress!, data.count)
+            msync(ptr.advanced(by: offset), data.count, MS_SYNC)
         }
     }
 
@@ -145,8 +146,9 @@ extension MemoryMappedFile {
         let tailSize = size - offset - data.count
         memmove(ptr.advanced(by: offset + data.count), ptr.advanced(by: offset), tailSize)
 
-        _ = data.withUnsafeBytes { buffer in
+        data.withUnsafeBytes { buffer in
             memcpy(ptr.advanced(by: offset), buffer.baseAddress!, data.count)
+            msync(ptr.advanced(by: offset), data.count + tailSize, MS_SYNC)
         }
     }
 
@@ -161,7 +163,7 @@ extension MemoryMappedFile {
         memmove(ptr.advanced(by: offset), ptr.advanced(by: tailOffset), tailSize)
 
         let newSize = size - length
-        try resize(newSize: newSize)
+        try resize(newSize: newSize) // sync
     }
 }
 
