@@ -177,6 +177,17 @@ extension MemoryMappedFile {
             .assumingMemoryBound(to: T.self)
             .pointee
     }
+
+    public func write<T>(_ value: T, at offset: Int) throws {
+        let length = MemoryLayout<T>.size
+        guard offset + length <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        ptr.advanced(by: offset)
+            .assumingMemoryBound(to: T.self)
+            .pointee = value
+        msync(ptr.advanced(by: offset), length, MS_SYNC)
+    }
 }
 
 extension MemoryMappedFile {
@@ -250,5 +261,9 @@ extension MemoryMappedFileSlice {
 
     public func read<T>(offset: Int) throws -> T {
         try parent.read(offset: baseOffset + offset)
+    }
+
+    public func write<T>(_ value: T, at offset: Int) throws {
+        try parent.write(value, at: baseOffset + offset)
     }
 }
