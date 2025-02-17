@@ -104,6 +104,13 @@ extension StreamedFile {
             $0.load(as: T.self)
         }
     }
+
+    public func write<T>(_ value: T, at offset: Int) throws {
+        let data = withUnsafeBytes(of: value, {
+            Data(buffer: $0.assumingMemoryBound(to: UInt8.self))
+        })
+        try self.writeData(data, at: offset)
+    }
 }
 
 extension StreamedFile {
@@ -173,5 +180,9 @@ extension StreamedFileSlice {
 
     public func read<T>(offset: Int) throws -> T {
         try parent.read(offset: baseOffset + offset)
+    }
+
+    public func write<T>(_ value: T, at offset: Int) throws {
+        try parent.write(value, at: baseOffset + offset)
     }
 }
