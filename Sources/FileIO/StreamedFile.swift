@@ -138,6 +138,14 @@ extension StreamedFile {
         )
     }
 
+    /// Creates a `FileSlice` representing a portion of the file.
+    ///
+    /// - Parameters:
+    ///   - offset: The starting position of the slice within the file.
+    ///   - length: The size of the slice in bytes.
+    ///   - mode: The mode of operation for the slice (`.direct` or `.buffered`).
+    /// - Returns: A `FileSlice` that provides access to the specified portion of the file.
+    /// - Throws: `FileIOError.offsetOutOfBounds` if the specified range is invalid.
     public func fileSlice(
         offset: Int,
         length: Int,
@@ -157,8 +165,11 @@ extension StreamedFile {
 }
 
 public class StreamedFileSlice: FileIOSiliceProtocol {
+    /// Mode of operation for `StreamedFileSlice`.
     public enum Mode {
+        /// Reads and writes are performed directly on the underlying file.
         case direct
+        /// Reads and writes operate on an in-memory buffer, requiring synchronization with the file.
         case buffered
     }
 
@@ -234,6 +245,9 @@ extension StreamedFileSlice {
         }
     }
 
+    /// Refreshes the buffer by reloading data from the parent file.
+    ///
+    /// - Note: This method only applies when the slice is in `.buffered` mode.
     public func refresh() {
         guard mode == .buffered else { return }
 
