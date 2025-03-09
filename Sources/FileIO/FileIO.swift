@@ -14,7 +14,6 @@ public protocol _FileIOProtocol {
 
     func sync()
 
-    func resize(newSize: Int) throws
     func insertData(_ data: Data, at offset: Int) throws
     func delete(offset: Int, length: Int) throws
 
@@ -27,6 +26,7 @@ public protocol FileIOProtocol: _FileIOProtocol {
 
     static func open(url: URL, isWritable: Bool) throws -> Self
 
+    func resize(newSize: Int) throws
     func fileSlice(offset: Int, length: Int) throws -> FileSlice
 }
 

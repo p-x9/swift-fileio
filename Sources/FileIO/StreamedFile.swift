@@ -3,7 +3,7 @@
 //  swift-fileio
 //
 //  Created by p-x9 on 2025/02/14
-//  
+//
 //
 
 import Foundation
@@ -39,12 +39,18 @@ extension StreamedFile {
 
 extension StreamedFile {
     public func readData(offset: Int, length: Int) throws -> Data {
+        guard offset >= 0, length > 0, offset + length <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
         fileHandle.seek(toFileOffset: UInt64(offset))
         return fileHandle.readData(ofLength: Int(length))
     }
 
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
+        guard offset >= 0, offset + data.count <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
         fileHandle.seek(toFileOffset: UInt64(offset))
         if #available(macOS 10.15.4, iOS 13.4, watchOS 6.2, tvOS 13.4, *) {
             try fileHandle.write(contentsOf: data)
@@ -155,10 +161,20 @@ public class StreamedFileSlice: FileIOSiliceProtocol {
 
 extension StreamedFileSlice {
     public func readData(offset: Int, length: Int) throws -> Data {
-        try parent.readData(offset: baseOffset + offset, length: length)
+        guard offset >= 0, length > 0, offset + length <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        return try parent.readData(
+            offset: baseOffset + offset,
+            length: length
+        )
     }
 
     public func writeData(_ data: Data, at offset: Int) throws {
+        guard isWritable else { throw FileIOError.notWritable }
+        guard offset >= 0, offset + data.count <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
         try parent.writeData(data, at: baseOffset + offset)
     }
 
@@ -166,23 +182,39 @@ extension StreamedFileSlice {
         parent.sync()
     }
 
-    public func resize(newSize: Int) throws {
-        try parent.resize(newSize: baseOffset + newSize)
-    }
-
     public func insertData(_ data: Data, at offset: Int) throws {
+        guard isWritable else { throw FileIOError.notWritable }
+        guard offset >= 0 && offset <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
+
         try parent.insertData(data, at: baseOffset + offset)
+        self.size += data.count
     }
 
     public func delete(offset: Int, length: Int) throws {
+        guard isWritable else { throw FileIOError.notWritable }
+        guard offset >= 0, length > 0, offset + length <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
+
         try parent.delete(offset: baseOffset + offset, length: length)
+        self.size -= length
     }
 
     public func read<T>(offset: Int) throws -> T {
-        try parent.read(offset: baseOffset + offset)
+        let length = MemoryLayout<T>.size
+        let data = try readData(offset: offset, length: length)
+        return data.withUnsafeBytes {
+            $0.load(as: T.self)
+        }
     }
 
     public func write<T>(_ value: T, at offset: Int) throws {
-        try parent.write(value, at: baseOffset + offset)
+        guard isWritable else { throw FileIOError.notWritable }
+        let data = withUnsafeBytes(of: value, {
+            Data(buffer: $0.assumingMemoryBound(to: UInt8.self))
+        })
+        try self.writeData(data, at: offset)
     }
 }

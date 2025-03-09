@@ -85,7 +85,7 @@ extension MemoryMappedFile {
 
 extension MemoryMappedFile {
     public func readData(offset: Int, length: Int) throws -> Data {
-        guard offset + length <= size else {
+        guard offset >= 0, length > 0, offset + length <= size else {
             throw FileIOError.offsetOutOfBounds
         }
         return Data(bytes: ptr.advanced(by: offset), count: length)
@@ -93,7 +93,7 @@ extension MemoryMappedFile {
 
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard offset + data.count <= size else {
+        guard offset >= 0, offset + data.count <= size else {
             throw FileIOError.offsetOutOfBounds
         }
         data.withUnsafeBytes { buffer in
@@ -179,6 +179,7 @@ extension MemoryMappedFile {
     }
 
     public func write<T>(_ value: T, at offset: Int) throws {
+        guard isWritable else { throw FileIOError.notWritable }
         let length = MemoryLayout<T>.size
         guard offset + length <= size else {
             throw FileIOError.offsetOutOfBounds
@@ -236,10 +237,20 @@ extension MemoryMappedFileSlice {
     }
 
     public func readData(offset: Int, length: Int) throws -> Data {
-        try parent.readData(offset: baseOffset + offset, length: length)
+        guard offset >= 0, length > 0, offset + length <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        return try parent.readData(
+            offset: baseOffset + offset,
+            length: length
+        )
     }
 
     public func writeData(_ data: Data, at offset: Int) throws {
+        guard isWritable else { throw FileIOError.notWritable }
+        guard offset >= 0, offset + data.count <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
         try parent.writeData(data, at: baseOffset + offset)
     }
 
@@ -247,23 +258,45 @@ extension MemoryMappedFileSlice {
         msync(parent.ptr.advanced(by: baseOffset), size, MS_SYNC)
     }
 
-    public func resize(newSize: Int) throws {
-        try parent.resize(newSize: baseOffset + newSize)
-    }
-
     public func insertData(_ data: Data, at offset: Int) throws {
+        guard isWritable else { throw FileIOError.notWritable }
+        guard offset >= 0 && offset <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
+
         try parent.insertData(data, at: baseOffset + offset)
+        self.size += data.count
     }
 
     public func delete(offset: Int, length: Int) throws {
+        guard isWritable else { throw FileIOError.notWritable }
+        guard offset >= 0, length > 0, offset + length <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
+
         try parent.delete(offset: baseOffset + offset, length: length)
+        self.size -= length
     }
 
     public func read<T>(offset: Int) throws -> T {
-        try parent.read(offset: baseOffset + offset)
+        let length = MemoryLayout<T>.size
+        guard offset + length <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        return ptr.advanced(by: offset)
+            .assumingMemoryBound(to: T.self)
+            .pointee
     }
 
     public func write<T>(_ value: T, at offset: Int) throws {
-        try parent.write(value, at: baseOffset + offset)
+        guard isWritable else { throw FileIOError.notWritable }
+        let length = MemoryLayout<T>.size
+        guard offset + length <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        ptr.advanced(by: offset)
+            .assumingMemoryBound(to: T.self)
+            .pointee = value
+        msync(ptr.advanced(by: offset), length, MS_SYNC)
     }
 }
