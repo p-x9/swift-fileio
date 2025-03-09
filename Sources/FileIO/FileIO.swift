@@ -9,6 +9,8 @@ public enum FileIOError: Error {
 }
 
 public protocol _FileIOProtocol {
+    var size: Int { get }
+
     /// Reads a specified range of bytes from the file.
     ///
     /// - Parameters:
@@ -85,4 +87,21 @@ public protocol FileIOProtocol: _FileIOProtocol {
 
 public protocol FileIOSiliceProtocol: _FileIOProtocol {
     var baseOffset: Int { get }
+}
+
+extension _FileIOProtocol {
+    /// Reads up to a specified number of bytes from the file, starting at a given offset.
+    ///
+    /// - Parameters:
+    ///   - offset: The starting position of the data to read.
+    ///   - count: The maximum number of bytes to read.
+    /// - Returns: A `Data` object containing the read bytes.
+    /// - Throws: `FileIOError.offsetOutOfBounds` if the specified range is invalid.
+    public func readData(
+        offset: Int,
+        upToCount count: Int
+    ) throws -> Data {
+        let size = min(count, size - offset)
+        return try readData(offset: offset, length: size)
+    }
 }
