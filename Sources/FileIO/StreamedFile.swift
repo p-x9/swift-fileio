@@ -129,16 +129,50 @@ extension StreamedFile {
         guard offset >= 0, length > 0, offset + length <= size else {
             throw FileIOError.offsetOutOfBounds
         }
-        return .init(
+        return try .init(
             parent: self,
             baseOffset: offset,
             size: length,
-            isWritable: isWritable
+            isWritable: isWritable,
+            mode: .buffered
+        )
+    }
+
+    /// Creates a `FileSlice` representing a portion of the file.
+    ///
+    /// - Parameters:
+    ///   - offset: The starting position of the slice within the file.
+    ///   - length: The size of the slice in bytes.
+    ///   - mode: The mode of operation for the slice (`.direct` or `.buffered`).
+    /// - Returns: A `FileSlice` that provides access to the specified portion of the file.
+    /// - Throws: `FileIOError.offsetOutOfBounds` if the specified range is invalid.
+    public func fileSlice(
+        offset: Int,
+        length: Int,
+        mode: StreamedFileSlice.Mode
+    ) throws -> FileSlice {
+        guard offset >= 0, length > 0, offset + length <= size else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        return try .init(
+            parent: self,
+            baseOffset: offset,
+            size: length,
+            isWritable: isWritable,
+            mode: mode
         )
     }
 }
 
 public class StreamedFileSlice: FileIOSiliceProtocol {
+    /// Mode of operation for `StreamedFileSlice`.
+    public enum Mode {
+        /// Reads and writes are performed directly on the underlying file.
+        case direct
+        /// Reads and writes operate on an in-memory buffer, requiring synchronization with the file.
+        case buffered
+    }
+
     public let parent: StreamedFile
 
     public private(set) var baseOffset: Int
@@ -146,16 +180,28 @@ public class StreamedFileSlice: FileIOSiliceProtocol {
 
     public let isWritable: Bool
 
+    public let mode: Mode
+    private var buffer: Data?
+
     init(
         parent: StreamedFile,
         baseOffset: Int,
         size: Int,
-        isWritable: Bool
-    ) {
+        isWritable: Bool,
+        mode: Mode
+    ) throws {
         self.parent = parent
         self.baseOffset = baseOffset
         self.size = size
         self.isWritable = isWritable
+        self.mode = mode
+
+        if mode == .buffered {
+            self.buffer = try parent.readData(
+                offset: baseOffset,
+                length: size
+            )
+        }
     }
 }
 
@@ -164,10 +210,16 @@ extension StreamedFileSlice {
         guard offset >= 0, length > 0, offset + length <= size else {
             throw FileIOError.offsetOutOfBounds
         }
-        return try parent.readData(
-            offset: baseOffset + offset,
-            length: length
-        )
+        switch mode {
+        case .direct:
+            return try parent.readData(
+                offset: baseOffset + offset,
+                length: length
+            )
+        case .buffered:
+            guard let buffer else { throw FileIOError.offsetOutOfBounds }
+            return buffer.subdata(in: offset..<offset + length)
+        }
     }
 
     public func writeData(_ data: Data, at offset: Int) throws {
@@ -175,11 +227,36 @@ extension StreamedFileSlice {
         guard offset >= 0, offset + data.count <= size else {
             throw FileIOError.offsetOutOfBounds
         }
-        try parent.writeData(data, at: baseOffset + offset)
+        switch mode {
+        case .direct:
+            try parent.writeData(data, at: baseOffset + offset)
+        case .buffered:
+            buffer?.replaceSubrange(offset..<offset + data.count, with: data)
+        }
     }
 
     public func sync() {
-        parent.sync()
+        switch mode {
+        case .direct:
+            parent.sync()
+        case .buffered:
+            guard let buffer else { return }
+            try? parent.writeData(buffer, at: baseOffset)
+        }
+    }
+
+    /// Refreshes the buffer by reloading data from the parent file.
+    ///
+    /// - Note: This method only applies when the slice is in `.buffered` mode.
+    public func refresh() {
+        guard mode == .buffered else { return }
+
+        let buffer = try? parent.readData(
+            offset: baseOffset,
+            length: size
+        )
+        guard let buffer else { return }
+        self.buffer = buffer
     }
 
     public func insertData(_ data: Data, at offset: Int) throws {
@@ -190,6 +267,10 @@ extension StreamedFileSlice {
 
         try parent.insertData(data, at: baseOffset + offset)
         self.size += data.count
+
+        if mode == .buffered {
+            buffer?.insert(contentsOf: data, at: offset)
+        }
     }
 
     public func delete(offset: Int, length: Int) throws {
@@ -200,6 +281,10 @@ extension StreamedFileSlice {
 
         try parent.delete(offset: baseOffset + offset, length: length)
         self.size -= length
+
+        if mode == .buffered {
+            buffer?.removeSubrange(offset ..< offset + length)
+        }
     }
 
     public func read<T>(offset: Int) throws -> T {
