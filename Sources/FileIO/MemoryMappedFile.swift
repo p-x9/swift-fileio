@@ -26,7 +26,8 @@ fileprivate let _open = Android.open(_:_:)
 #endif
 
 public final class MemoryMappedFile: FileIOProtocol {
-    private var fileDescriptor: Int32
+    @_spi(Core)
+    public var fileDescriptor: Int32
     public private(set) var ptr: UnsafeMutableRawPointer
     public private(set) var size: Int
 

@@ -9,7 +9,8 @@
 import Foundation
 
 public final class StreamedFile: FileIOProtocol {
-    private let fileHandle: FileHandle
+    @_spi(Core)
+    public let fileHandle: FileHandle
     public var size: UInt64 {
         return fileHandle.seekToEndOfFile()
     }
@@ -181,7 +182,9 @@ public class StreamedFileSlice: FileIOSiliceProtocol {
     public let isWritable: Bool
 
     public let mode: Mode
-    private var buffer: Data?
+
+    @_spi(Core)
+    public private(set) var buffer: Data?
 
     init(
         parent: StreamedFile,
