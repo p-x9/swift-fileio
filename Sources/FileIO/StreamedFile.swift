@@ -11,8 +11,8 @@ import Foundation
 public final class StreamedFile: FileIOProtocol {
     @_spi(Core)
     public let fileHandle: FileHandle
-    public var size: UInt64 {
-        return fileHandle.seekToEndOfFile()
+    public var size: Int {
+        return numericCast(fileHandle.seekToEndOfFile())
     }
 
     public let isWritable: Bool
@@ -83,7 +83,7 @@ extension StreamedFile {
         }
 
         let remainingData = try readData(offset: offset, length: Int(size) - offset)
-        try resize(newSize: Int(size + UInt64(data.count)))
+        try resize(newSize: size + numericCast(data.count))
 
         try writeData(remainingData, at: offset + data.count)
 
