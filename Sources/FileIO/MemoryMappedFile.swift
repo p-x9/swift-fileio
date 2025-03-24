@@ -86,7 +86,7 @@ extension MemoryMappedFile {
 
 extension MemoryMappedFile {
     public func readData(offset: Int, length: Int) throws -> Data {
-        guard offset >= 0, length > 0, offset + length <= size else {
+        guard offset >= 0, length >= 0, offset + length <= size else {
             throw FileIOError.offsetOutOfBounds
         }
         return Data(bytes: ptr.advanced(by: offset), count: length)
@@ -155,7 +155,7 @@ extension MemoryMappedFile {
 
     public func delete(offset: Int, length: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard offset >= 0, length > 0, offset + length <= size else {
+        guard offset >= 0, length >= 0, offset + length <= size else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -199,7 +199,7 @@ extension MemoryMappedFile {
         offset: Int,
         length: Int
     ) throws -> FileSlice {
-        guard offset >= 0, length > 0, offset + length <= size else {
+        guard offset >= 0, length >= 0, offset + length <= size else {
             throw FileIOError.offsetOutOfBounds
         }
         return .init(
@@ -238,7 +238,7 @@ extension MemoryMappedFileSlice {
     }
 
     public func readData(offset: Int, length: Int) throws -> Data {
-        guard offset >= 0, length > 0, offset + length <= size else {
+        guard offset >= 0, length >= 0, offset + length <= size else {
             throw FileIOError.offsetOutOfBounds
         }
         return try parent.readData(
@@ -271,7 +271,7 @@ extension MemoryMappedFileSlice {
 
     public func delete(offset: Int, length: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard offset >= 0, length > 0, offset + length <= size else {
+        guard offset >= 0, length >= 0, offset + length <= size else {
             throw FileIOError.offsetOutOfBounds
         }
 
