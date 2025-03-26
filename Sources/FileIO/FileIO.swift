@@ -54,6 +54,7 @@ public protocol _FileIOProtocol {
     func delete(offset: Int, length: Int) throws
 
     func read<T>(offset: Int) throws -> T
+    func read<T>(offset: Int, as: T.Type) throws -> T
     func write<T>(_ value: T, at offset: Int) throws
 }
 

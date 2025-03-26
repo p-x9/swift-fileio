@@ -169,7 +169,16 @@ extension MemoryMappedFile {
 }
 
 extension MemoryMappedFile {
+    @_disfavoredOverload
     public func read<T>(offset: Int) throws -> T {
+        try read(offset: offset, as: T.self)
+    }
+
+    public func read<T>(offset: Int) throws -> Optional<T> {
+        try read(offset: offset, as: T.self)
+    }
+
+    public func read<T>(offset: Int, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
         guard offset + length <= size else {
             throw FileIOError.offsetOutOfBounds
@@ -279,9 +288,18 @@ extension MemoryMappedFileSlice {
         self.size -= length
     }
 
+    @_disfavoredOverload
     public func read<T>(offset: Int) throws -> T {
+        try read(offset: offset, as: T.self)
+    }
+
+    public func read<T>(offset: Int) throws -> Optional<T> {
+        try read(offset: offset, as: T.self)
+    }
+
+    public func read<T>(offset: Int, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
-        guard offset + length <= size else {
+        guard offset >= 0, length >= 0, offset + length <= size else {
             throw FileIOError.offsetOutOfBounds
         }
         return ptr.advanced(by: offset)

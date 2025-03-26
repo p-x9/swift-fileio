@@ -104,7 +104,16 @@ extension StreamedFile {
 }
 
 extension StreamedFile {
+    @_disfavoredOverload
     public func read<T>(offset: Int) throws -> T {
+        try read(offset: offset, as: T.self)
+    }
+
+    public func read<T>(offset: Int) throws -> Optional<T> {
+        try read(offset: offset, as: T.self)
+    }
+
+    public func read<T>(offset: Int, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
         let data = try readData(offset: offset, length: length)
         return data.withUnsafeBytes {
@@ -290,7 +299,16 @@ extension StreamedFileSlice {
         }
     }
 
+    @_disfavoredOverload
     public func read<T>(offset: Int) throws -> T {
+        try read(offset: offset, as: T.self)
+    }
+
+    public func read<T>(offset: Int) throws -> Optional<T> {
+        try read(offset: offset, as: T.self)
+    }
+
+    public func read<T>(offset: Int, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
         let data = try readData(offset: offset, length: length)
         return data.withUnsafeBytes {
