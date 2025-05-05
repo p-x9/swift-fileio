@@ -105,14 +105,17 @@ extension StreamedFile {
 
 extension StreamedFile {
     @_disfavoredOverload
+    @inlinable @inline(__always)
     public func read<T>(offset: Int) throws -> T {
         try read(offset: offset, as: T.self)
     }
 
+    @inlinable @inline(__always)
     public func read<T>(offset: Int) throws -> Optional<T> {
         try read(offset: offset, as: T.self)
     }
 
+    @inlinable @inline(__always)
     public func read<T>(offset: Int, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
         let data = try readData(offset: offset, length: length)
@@ -121,6 +124,7 @@ extension StreamedFile {
         }
     }
 
+    @inlinable @inline(__always)
     public func write<T>(_ value: T, at offset: Int) throws {
         let data = withUnsafeBytes(of: value, {
             Data(buffer: $0.assumingMemoryBound(to: UInt8.self))
@@ -300,14 +304,17 @@ extension StreamedFileSlice {
     }
 
     @_disfavoredOverload
+    @inlinable @inline(__always)
     public func read<T>(offset: Int) throws -> T {
         try read(offset: offset, as: T.self)
     }
 
+    @inlinable @inline(__always)
     public func read<T>(offset: Int) throws -> Optional<T> {
         try read(offset: offset, as: T.self)
     }
 
+    @inlinable @inline(__always)
     public func read<T>(offset: Int, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
         let data = try readData(offset: offset, length: length)
@@ -316,6 +323,7 @@ extension StreamedFileSlice {
         }
     }
 
+    @inlinable @inline(__always)
     public func write<T>(_ value: T, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let data = withUnsafeBytes(of: value, {
