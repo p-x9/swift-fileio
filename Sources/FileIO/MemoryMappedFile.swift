@@ -85,6 +85,7 @@ extension MemoryMappedFile {
 }
 
 extension MemoryMappedFile {
+    @inlinable @inline(__always)
     public func readData(offset: Int, length: Int) throws -> Data {
         guard offset >= 0, length >= 0, offset + length <= size else {
             throw FileIOError.offsetOutOfBounds
@@ -92,6 +93,7 @@ extension MemoryMappedFile {
         return Data(bytes: ptr.advanced(by: offset), count: length)
     }
 
+    @inlinable @inline(__always)
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard offset >= 0, offset + data.count <= size else {
@@ -103,6 +105,7 @@ extension MemoryMappedFile {
         }
     }
 
+    @inlinable @inline(__always)
     public func sync() {
         msync(ptr, size, MS_SYNC)
     }
@@ -135,6 +138,7 @@ extension MemoryMappedFile {
         self.size = newSize
     }
 
+    @inlinable @inline(__always)
     public func insertData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard offset >= 0, offset <= size else {
@@ -153,6 +157,7 @@ extension MemoryMappedFile {
         }
     }
 
+    @inlinable @inline(__always)
     public func delete(offset: Int, length: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard offset >= 0, length >= 0, offset + length <= size else {
@@ -170,14 +175,17 @@ extension MemoryMappedFile {
 
 extension MemoryMappedFile {
     @_disfavoredOverload
+    @inlinable @inline(__always)
     public func read<T>(offset: Int) throws -> T {
         try read(offset: offset, as: T.self)
     }
 
+    @inlinable @inline(__always)
     public func read<T>(offset: Int) throws -> Optional<T> {
         try read(offset: offset, as: T.self)
     }
 
+    @inlinable @inline(__always)
     public func read<T>(offset: Int, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
         guard offset + length <= size else {
@@ -188,6 +196,7 @@ extension MemoryMappedFile {
             .pointee
     }
 
+    @inlinable @inline(__always)
     public func write<T>(_ value: T, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let length = MemoryLayout<T>.size
@@ -242,10 +251,12 @@ public class MemoryMappedFileSlice: FileIOSiliceProtocol {
 }
 
 extension MemoryMappedFileSlice {
+    @inlinable @inline(__always)
     public var ptr: UnsafeMutableRawPointer {
         parent.ptr.advanced(by: baseOffset)
     }
 
+    @inlinable @inline(__always)
     public func readData(offset: Int, length: Int) throws -> Data {
         guard offset >= 0, length >= 0, offset + length <= size else {
             throw FileIOError.offsetOutOfBounds
@@ -256,6 +267,7 @@ extension MemoryMappedFileSlice {
         )
     }
 
+    @inlinable @inline(__always)
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard offset >= 0, offset + data.count <= size else {
@@ -264,6 +276,7 @@ extension MemoryMappedFileSlice {
         try parent.writeData(data, at: baseOffset + offset)
     }
 
+    @inlinable @inline(__always)
     public func sync() {
         msync(parent.ptr.advanced(by: baseOffset), size, MS_SYNC)
     }
@@ -289,14 +302,17 @@ extension MemoryMappedFileSlice {
     }
 
     @_disfavoredOverload
+    @inlinable @inline(__always)
     public func read<T>(offset: Int) throws -> T {
         try read(offset: offset, as: T.self)
     }
 
+    @inlinable @inline(__always)
     public func read<T>(offset: Int) throws -> Optional<T> {
         try read(offset: offset, as: T.self)
     }
 
+    @inlinable @inline(__always)
     public func read<T>(offset: Int, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
         guard offset >= 0, length >= 0, offset + length <= size else {
@@ -307,6 +323,7 @@ extension MemoryMappedFileSlice {
             .pointee
     }
 
+    @inlinable @inline(__always)
     public func write<T>(_ value: T, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let length = MemoryLayout<T>.size
