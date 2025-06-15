@@ -56,12 +56,12 @@ public final class MemoryMappedFile: FileIOProtocol {
 extension MemoryMappedFile {
     public static func open(url: URL, isWritable: Bool) throws -> MemoryMappedFile {
         let fd = _open(url.path, isWritable ? O_RDWR : O_RDONLY)
-        guard fd > 0 else {
+        guard _fastPath(fd > 0) else {
             throw POSIXError(.init(rawValue: errno)!)
         }
 
         let fileSize = lseek(fd, 0, SEEK_END)
-        guard fileSize > 0 else {
+        guard _fastPath(fileSize > 0) else {
             close(fd)
             throw POSIXError(.init(rawValue: errno)!)
         }
@@ -70,7 +70,7 @@ extension MemoryMappedFile {
         if isWritable { prot |= PROT_WRITE }
         let ptr = mmap(nil, Int(fileSize), prot, MAP_SHARED, fd, 0)
         guard let ptr,
-              ptr != MAP_FAILED else {
+              _fastPath(ptr != MAP_FAILED) else {
             close(fd)
             throw POSIXError(.init(rawValue: errno)!)
         }
@@ -87,7 +87,9 @@ extension MemoryMappedFile {
 extension MemoryMappedFile {
     @inlinable @inline(__always)
     public func readData(offset: Int, length: Int) throws -> Data {
-        guard offset >= 0, length >= 0, offset + length <= size else {
+        guard _fastPath(offset >= 0),
+              _fastPath(length >= 0),
+              _fastPath(offset + length <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
         return Data(bytes: ptr.advanced(by: offset), count: length)
@@ -96,7 +98,8 @@ extension MemoryMappedFile {
     @inlinable @inline(__always)
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard offset >= 0, offset + data.count <= size else {
+        guard _fastPath(offset >= 0),
+              _fastPath(offset + data.count <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
         data.withUnsafeBytes { buffer in
@@ -118,7 +121,7 @@ extension MemoryMappedFile {
 extension MemoryMappedFile {
     public func resize(newSize: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard newSize > 0 else { return }
+        guard _fastPath(newSize > 0) else { return }
 
         guard ftruncate(fileDescriptor, off_t(newSize)) == 0 else {
             throw POSIXError(.init(rawValue: errno)!)
@@ -141,7 +144,8 @@ extension MemoryMappedFile {
     @inlinable @inline(__always)
     public func insertData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard offset >= 0, offset <= size else {
+        guard _fastPath(offset >= 0),
+              _fastPath(offset <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -160,7 +164,9 @@ extension MemoryMappedFile {
     @inlinable @inline(__always)
     public func delete(offset: Int, length: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard offset >= 0, length >= 0, offset + length <= size else {
+        guard _fastPath(offset >= 0),
+              _fastPath(length >= 0),
+              _fastPath(offset + length <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -188,7 +194,7 @@ extension MemoryMappedFile {
     @inlinable @inline(__always)
     public func read<T>(offset: Int, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
-        guard offset + length <= size else {
+        guard _fastPath(offset + length <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
         return ptr.advanced(by: offset)
@@ -200,7 +206,7 @@ extension MemoryMappedFile {
     public func write<T>(_ value: T, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let length = MemoryLayout<T>.size
-        guard offset + length <= size else {
+        guard _fastPath(offset + length <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
         ptr.advanced(by: offset)
@@ -217,7 +223,9 @@ extension MemoryMappedFile {
         offset: Int,
         length: Int
     ) throws -> FileSlice {
-        guard offset >= 0, length >= 0, offset + length <= size else {
+        guard _fastPath(offset >= 0),
+              _fastPath(length >= 0),
+              _fastPath(offset + length <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
         return .init(
@@ -258,7 +266,9 @@ extension MemoryMappedFileSlice {
 
     @inlinable @inline(__always)
     public func readData(offset: Int, length: Int) throws -> Data {
-        guard offset >= 0, length >= 0, offset + length <= size else {
+        guard _fastPath(offset >= 0),
+              _fastPath(length >= 0),
+              _fastPath(offset + length <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
         return try parent.readData(
@@ -270,7 +280,8 @@ extension MemoryMappedFileSlice {
     @inlinable @inline(__always)
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard offset >= 0, offset + data.count <= size else {
+        guard _fastPath(offset >= 0),
+              _fastPath(offset + data.count <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
         try parent.writeData(data, at: baseOffset + offset)
@@ -283,7 +294,8 @@ extension MemoryMappedFileSlice {
 
     public func insertData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard offset >= 0 && offset <= size else {
+        guard _fastPath(offset >= 0) &&
+                _fastPath(offset <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -293,7 +305,9 @@ extension MemoryMappedFileSlice {
 
     public func delete(offset: Int, length: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard offset >= 0, length >= 0, offset + length <= size else {
+        guard _fastPath(offset >= 0),
+              _fastPath(length >= 0),
+              _fastPath(offset + length <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -315,7 +329,9 @@ extension MemoryMappedFileSlice {
     @inlinable @inline(__always)
     public func read<T>(offset: Int, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
-        guard offset >= 0, length >= 0, offset + length <= size else {
+        guard _fastPath(offset >= 0),
+              _fastPath(length >= 0),
+              _fastPath(offset + length <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
         return ptr.advanced(by: offset)
@@ -327,7 +343,7 @@ extension MemoryMappedFileSlice {
     public func write<T>(_ value: T, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let length = MemoryLayout<T>.size
-        guard offset + length <= size else {
+        guard _fastPath(offset + length <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
         ptr.advanced(by: offset)
