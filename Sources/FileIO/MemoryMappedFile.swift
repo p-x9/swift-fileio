@@ -8,24 +8,7 @@
 
 import Foundation
 
-#if canImport(Darwin)
-import Darwin
-fileprivate let _open = Darwin.open(_:_:)
-#elseif canImport(Glibc)
-import Glibc
-fileprivate let _open = Glibc.open(_:_:)
-#elseif canImport(Musl)
-import Musl
-fileprivate let _open = Musl.open(_:_:)
-#elseif canImport(WASILibc)
-import WASILibc
-fileprivate let _open = WASILibc.open(_:_:)
-#elseif canImport(Android)
-import Android
-fileprivate let _open = Android.open(_:_:)
-#endif
-
-public final class MemoryMappedFile: FileIOProtocol {
+public final class MemoryMappedFile: MemoryMappedFileIOProtocol {
     @_spi(Core)
     public var fileDescriptor: Int32
     public private(set) var ptr: UnsafeMutableRawPointer
@@ -33,7 +16,7 @@ public final class MemoryMappedFile: FileIOProtocol {
 
     public let isWritable: Bool
 
-    private init(
+    internal init(
         fileDescriptor: Int32,
         ptr: UnsafeMutableRawPointer,
         size: Int,
@@ -113,12 +96,12 @@ extension MemoryMappedFile {
         msync(ptr, size, MS_SYNC)
     }
 
-    private func unmap() {
+    internal func unmap() {
         munmap(ptr, size)
     }
 }
 
-extension MemoryMappedFile {
+extension MemoryMappedFile: ResizableFileIOProtocol {
     public func resize(newSize: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(newSize > 0) else { return }
@@ -217,7 +200,7 @@ extension MemoryMappedFile {
 }
 
 extension MemoryMappedFile {
-    public typealias FileSlice = MemoryMappedFileSlice
+    public typealias FileSlice = MemoryMappedFileSlice<MemoryMappedFile>
 
     public func fileSlice(
         offset: Int,
@@ -237,8 +220,8 @@ extension MemoryMappedFile {
     }
 }
 
-public class MemoryMappedFileSlice: FileIOSiliceProtocol {
-    public let parent: MemoryMappedFile
+public class MemoryMappedFileSlice<Parent: MemoryMappedFileIOProtocol>: FileIOSiliceProtocol {
+    public let parent: Parent
 
     public private(set) var baseOffset: Int
     public private(set) var size: Int
@@ -246,7 +229,7 @@ public class MemoryMappedFileSlice: FileIOSiliceProtocol {
     public let isWritable: Bool
 
     init(
-        parent: MemoryMappedFile,
+        parent: Parent,
         baseOffset: Int,
         size: Int,
         isWritable: Bool
@@ -291,11 +274,13 @@ extension MemoryMappedFileSlice {
     public func sync() {
         msync(parent.ptr.advanced(by: baseOffset), size, MS_SYNC)
     }
+}
 
+extension MemoryMappedFileSlice: ResizableFileIOProtocol where Parent: ResizableFileIOProtocol {
     public func insertData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard _fastPath(offset >= 0) &&
-                _fastPath(offset <= size) else {
+        guard _fastPath(offset >= 0),
+              _fastPath(offset <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -314,7 +299,9 @@ extension MemoryMappedFileSlice {
         try parent.delete(offset: baseOffset + offset, length: length)
         self.size -= length
     }
+}
 
+extension MemoryMappedFileSlice {
     @_disfavoredOverload
     @inlinable @inline(__always)
     public func read<T>(offset: Int) throws -> T {

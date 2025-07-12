@@ -72,7 +72,7 @@ extension StreamedFile {
     }
 }
 
-extension StreamedFile {
+extension StreamedFile: ResizableFileIOProtocol {
     public func resize(newSize: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(newSize > 0) else { return }
@@ -287,7 +287,9 @@ extension StreamedFileSlice {
         guard let buffer else { return }
         self.buffer = buffer
     }
+}
 
+extension StreamedFileSlice: ResizableFileIOProtocol {
     public func insertData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(offset >= 0),
@@ -318,7 +320,9 @@ extension StreamedFileSlice {
             buffer?.removeSubrange(offset ..< offset + length)
         }
     }
+}
 
+extension StreamedFileSlice {
     @_disfavoredOverload
     @inlinable @inline(__always)
     public func read<T>(offset: Int) throws -> T {
