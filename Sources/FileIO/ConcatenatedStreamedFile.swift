@@ -9,7 +9,7 @@
 import Foundation
 
 public final class ConcatenatedStreamedFile: StreamedFileIOProtocol {
-    public struct File {
+    public struct FileSegment {
         public let offset: Int
         public let size: Int
         public let _file: StreamedFile
@@ -18,12 +18,12 @@ public final class ConcatenatedStreamedFile: StreamedFileIOProtocol {
     public let size: Int
     public let isWritable: Bool
 
-    public let _files: [File]
+    public let _files: [FileSegment]
 
     private init(
         size: Int,
         isWritable: Bool,
-        files: [File]
+        files: [FileSegment]
     ) {
         self.size = size
         self.isWritable = isWritable
@@ -40,7 +40,7 @@ extension ConcatenatedStreamedFile {
         urls: [URL],
         isWritable: Bool
     ) throws -> ConcatenatedStreamedFile {
-        var files: [File] = []
+        var files: [FileSegment] = []
         var fullSize: Int = 0
         for url in urls {
             let file: StreamedFile = try .open(url: url, isWritable: isWritable)
@@ -57,7 +57,7 @@ extension ConcatenatedStreamedFile {
 
 extension ConcatenatedStreamedFile {
     @inlinable @inline(__always)
-    public func _file(for offset: Int) throws -> File {
+    public func _file(for offset: Int) throws -> FileSegment {
         guard let file = _files.first(
             where: { $0.offset <= offset && offset < $0.offset + $0.size }
         ) else {

@@ -9,18 +9,24 @@
 import Foundation
 
 public final class ConcatenatedMemoryMappedFile: MemoryMappedFileIOProtocol {
+    public struct FileSegment {
+        public let offset: Int
+        public let size: Int
+        public let _file: MemoryMappedFile
+    }
+
     public private(set) var ptr: UnsafeMutableRawPointer
     public private(set) var size: Int
 
     public let isWritable: Bool
 
-    public let _files: [MemoryMappedFile]
+    public let _files: [FileSegment]
 
     private init(
         ptr: UnsafeMutableRawPointer,
         size: Int,
         isWritable: Bool,
-        files: [MemoryMappedFile]
+        files: [FileSegment]
     ) {
         self.ptr = ptr
         self.size = size
@@ -76,7 +82,7 @@ extension ConcatenatedMemoryMappedFile {
         if isWritable { prot |= PROT_WRITE }
 
         var offset = 0
-        var files: [MemoryMappedFile] = []
+        var files: [FileSegment] = []
         for (fd, size) in fdAndSizes {
             let size: Int = numericCast(size)
             let ptr = basePtr.advanced(by: offset)
@@ -88,10 +94,14 @@ extension ConcatenatedMemoryMappedFile {
             }
             files.append(
                 .init(
-                    fileDescriptor: fd,
-                    ptr: ptr,
+                    offset: offset,
                     size: size,
-                    isWritable: isWritable
+                    _file: .init(
+                        fileDescriptor: fd,
+                        ptr: ptr,
+                        size: size,
+                        isWritable: isWritable
+                    )
                 )
             )
             offset += size
@@ -107,6 +117,18 @@ extension ConcatenatedMemoryMappedFile {
 
     private static func cleanup(fds: [CInt]) {
         fds.forEach { close($0) }
+    }
+}
+
+extension ConcatenatedMemoryMappedFile {
+    @inlinable @inline(__always)
+    public func _file(for offset: Int) throws -> FileSegment {
+        guard let file = _files.first(
+            where: { $0.offset <= offset && offset < $0.offset + $0.size }
+        ) else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        return file
     }
 }
 
@@ -136,11 +158,11 @@ extension ConcatenatedMemoryMappedFile {
 
     @inlinable @inline(__always)
     public func sync() {
-        _files.forEach { $0.sync() }
+        _files.forEach { $0._file.sync() }
     }
 
     internal func unmap() {
-        _files.forEach { $0.unmap() }
+        _files.forEach { $0._file.unmap() }
     }
 }
 
