@@ -67,6 +67,7 @@ extension ConcatenatedStreamedFile {
     }
 }
 
+// Must support reading and writing of boundaries between files.
 extension ConcatenatedStreamedFile {
     @inlinable @inline(__always)
     public func readData(offset: Int, length: Int) throws -> Data {
