@@ -90,6 +90,8 @@ public protocol MemoryMappedFileIOProtocol: FileIOProtocol {
     var ptr: UnsafeMutableRawPointer { get }
 }
 
+public protocol StreamedFileIOProtocol: FileIOProtocol {}
+
 extension _FileIOProtocol {
     /// Reads up to a specified number of bytes from the file, starting at a given offset.
     ///

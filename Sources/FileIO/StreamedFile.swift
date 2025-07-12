@@ -8,7 +8,7 @@
 
 import Foundation
 
-public final class StreamedFile: FileIOProtocol {
+public final class StreamedFile: StreamedFileIOProtocol {
     @_spi(Core)
     public let fileHandle: FileHandle
     public var size: Int {
@@ -140,7 +140,7 @@ extension StreamedFile {
 }
 
 extension StreamedFile {
-    public typealias FileSlice = StreamedFileSlice
+    public typealias FileSlice = StreamedFileSlice<StreamedFile>
 
     public func fileSlice(
         offset: Int,
@@ -171,7 +171,7 @@ extension StreamedFile {
     public func fileSlice(
         offset: Int,
         length: Int,
-        mode: StreamedFileSlice.Mode
+        mode: FileSlice.Mode
     ) throws -> FileSlice {
         guard _fastPath(offset >= 0),
               _fastPath(length >= 0),
@@ -188,7 +188,7 @@ extension StreamedFile {
     }
 }
 
-public class StreamedFileSlice: FileIOSiliceProtocol {
+public class StreamedFileSlice<Parent: StreamedFileIOProtocol>: FileIOSiliceProtocol {
     /// Mode of operation for `StreamedFileSlice`.
     public enum Mode {
         /// Reads and writes are performed directly on the underlying file.
@@ -197,7 +197,7 @@ public class StreamedFileSlice: FileIOSiliceProtocol {
         case buffered
     }
 
-    public let parent: StreamedFile
+    public let parent: Parent
 
     public private(set) var baseOffset: Int
     public private(set) var size: Int
@@ -210,7 +210,7 @@ public class StreamedFileSlice: FileIOSiliceProtocol {
     public private(set) var buffer: Data?
 
     init(
-        parent: StreamedFile,
+        parent: Parent,
         baseOffset: Int,
         size: Int,
         isWritable: Bool,
@@ -289,7 +289,7 @@ extension StreamedFileSlice {
     }
 }
 
-extension StreamedFileSlice: ResizableFileIOProtocol {
+extension StreamedFileSlice: ResizableFileIOProtocol where Parent: ResizableFileIOProtocol {
     public func insertData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(offset >= 0),
