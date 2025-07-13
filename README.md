@@ -14,6 +14,9 @@ A Swift library for reading and writing files.
 - [MemoryMappedFile](./Sources/FileIO/MemoryMappedFile.swift): using mmap
 - [StreamedFile](./Sources/FileIO/StreamedFile.swift): using FileHandle (syscall)
 
+- [ConcatenatedMemoryMappedFile](./Sources/FileIO/ConcatenatedMemoryMappedFile.swift): using mmap. Treats multiple files as one continuous virtual file.
+- [StreamedFile](./Sources/FileIO/ConcatenatedStreamedFile.swift): using FileHandle (syscall). Treats multiple files as one continuous virtual file.
+
 ## Usage
 
 MemoryMappedFile/StreamedFile have the same API available for both.
