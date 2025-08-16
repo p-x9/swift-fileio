@@ -49,7 +49,7 @@ extension MemoryMappedFile {
             throw POSIXError(.init(rawValue: errno)!)
         }
 
-        if fileSize == 0 {
+        guard _fastPath(fileSize > 0) else {
             return .init(
                 fileDescriptor: fd,
                 ptr: .allocate(byteCount: 0, alignment: 1),
