@@ -75,7 +75,7 @@ extension StreamedFile {
 extension StreamedFile: ResizableFileIOProtocol {
     public func resize(newSize: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard _fastPath(newSize > 0) else { return }
+        guard _fastPath(newSize >= 0) else { return }
         fileHandle.truncateFile(atOffset: UInt64(newSize))
     }
 

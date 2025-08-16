@@ -44,9 +44,18 @@ extension MemoryMappedFile {
         }
 
         let fileSize = lseek(fd, 0, SEEK_END)
-        guard _fastPath(fileSize > 0) else {
+        guard _fastPath(fileSize >= 0) else {
             close(fd)
             throw POSIXError(.init(rawValue: errno)!)
+        }
+
+        if fileSize == 0 {
+            return .init(
+                fileDescriptor: fd,
+                ptr: .allocate(byteCount: 0, alignment: 1),
+                size: 0,
+                isWritable: isWritable
+            )
         }
 
         var prot: Int32 = PROT_READ
@@ -104,7 +113,7 @@ extension MemoryMappedFile {
 extension MemoryMappedFile: ResizableFileIOProtocol {
     public func resize(newSize: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard _fastPath(newSize > 0) else { return }
+        guard _fastPath(newSize >= 0) else { return }
 
         guard ftruncate(fileDescriptor, off_t(newSize)) == 0 else {
             throw POSIXError(.init(rawValue: errno)!)
