@@ -33,6 +33,9 @@ jobs:
       - name: Build
         run: swift build
 
+      - name: Test
+        run: swift test
+
   linux-build:
     name: Linux Test
     runs-on: ubuntu-22.04
@@ -47,3 +50,5 @@ jobs:
 
       - name: Build
         run: swift build
+      - name: Test
+        run: swift test
