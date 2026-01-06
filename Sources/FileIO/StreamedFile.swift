@@ -188,7 +188,7 @@ extension StreamedFile {
     }
 }
 
-public class StreamedFileSlice<Parent: StreamedFileIOProtocol>: FileIOSiliceProtocol {
+public class StreamedFileSlice<Parent: StreamedFileIOProtocol>: FileIOSiliceProtocol, _StreamedFileIOProtocol {
     /// Mode of operation for `StreamedFileSlice`.
     public enum Mode {
         /// Reads and writes are performed directly on the underlying file.
