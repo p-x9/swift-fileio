@@ -110,4 +110,14 @@ extension _FileIOProtocol {
         let size = min(count, size - offset)
         return try readData(offset: offset, length: size)
     }
+
+    /// Reads the entire contents of the file.
+    ///
+    /// - Returns: A `Data` object containing all bytes in the file, from offset `0`
+    ///   up to the current file size.
+    /// - Throws: `FileIOError.offsetOutOfBounds` if the file size is invalid or
+    ///   cannot be read.
+    public func readAllData() throws -> Data {
+        try readData(offset: 0, length: size)
+    }
 }
