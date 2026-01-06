@@ -8,6 +8,7 @@
 
 import Foundation
 
+/// - Warning: Currently, the size of each file must be a multiple of the page size.
 public final class ConcatenatedMemoryMappedFile: MemoryMappedFileIOProtocol {
     public struct FileSegment {
         public let offset: Int
