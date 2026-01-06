@@ -229,7 +229,7 @@ extension MemoryMappedFile {
     }
 }
 
-public class MemoryMappedFileSlice<Parent: MemoryMappedFileIOProtocol>: FileIOSiliceProtocol {
+public class MemoryMappedFileSlice<Parent: MemoryMappedFileIOProtocol>: FileIOSiliceProtocol, _MemoryMappedFileIOProtocol {
     public let parent: Parent
 
     public private(set) var baseOffset: Int

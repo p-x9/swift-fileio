@@ -86,11 +86,14 @@ public protocol ResizableFileIOProtocol: _FileIOProtocol {
     func delete(offset: Int, length: Int) throws
 }
 
-public protocol MemoryMappedFileIOProtocol: FileIOProtocol {
+public protocol _MemoryMappedFileIOProtocol: _FileIOProtocol {
     var ptr: UnsafeMutableRawPointer { get }
 }
 
-public protocol StreamedFileIOProtocol: FileIOProtocol {}
+public protocol MemoryMappedFileIOProtocol: _MemoryMappedFileIOProtocol, FileIOProtocol {}
+
+public protocol _StreamedFileIOProtocol: _FileIOProtocol {}
+public protocol StreamedFileIOProtocol: _StreamedFileIOProtocol, FileIOProtocol {}
 
 extension _FileIOProtocol {
     /// Reads up to a specified number of bytes from the file, starting at a given offset.
