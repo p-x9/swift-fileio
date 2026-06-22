@@ -71,10 +71,7 @@ extension ConcatenatedStreamedFile {
 extension ConcatenatedStreamedFile {
     @inlinable @inline(__always)
     public func readData(offset: Int, length: Int) throws -> Data {
-        guard _fastPath(offset >= 0),
-              _fastPath(length >= 0),
-              _fastPath(length <= size),
-              _fastPath(offset <= size - length) else {
+        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -100,9 +97,7 @@ extension ConcatenatedStreamedFile {
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let count = data.count
-        guard _fastPath(offset >= 0),
-              _fastPath(count <= size),
-              _fastPath(offset <= size - count) else {
+        guard _fastPath(_isInBounds(offset, length: count, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -167,10 +162,7 @@ extension ConcatenatedStreamedFile {
         offset: Int,
         length: Int
     ) throws -> FileSlice {
-        guard _fastPath(offset >= 0),
-              _fastPath(length >= 0),
-              _fastPath(length <= size),
-              _fastPath(offset <= size - length) else {
+        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         return try .init(
@@ -195,10 +187,7 @@ extension ConcatenatedStreamedFile {
         length: Int,
         mode: FileSlice.Mode
     ) throws -> FileSlice {
-        guard _fastPath(offset >= 0),
-              _fastPath(length >= 0),
-              _fastPath(length <= size),
-              _fastPath(offset <= size - length) else {
+        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         return try .init(

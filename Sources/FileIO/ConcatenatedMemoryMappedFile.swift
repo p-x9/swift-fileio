@@ -136,10 +136,7 @@ extension ConcatenatedMemoryMappedFile {
 extension ConcatenatedMemoryMappedFile {
     @inlinable @inline(__always)
     public func readData(offset: Int, length: Int) throws -> Data {
-        guard _fastPath(offset >= 0),
-              _fastPath(length >= 0),
-              _fastPath(length <= size),
-              _fastPath(offset <= size - length) else {
+        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         return Data(bytes: ptr.advanced(by: offset), count: length)
@@ -149,9 +146,7 @@ extension ConcatenatedMemoryMappedFile {
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let count = data.count
-        guard _fastPath(offset >= 0),
-              _fastPath(count <= size),
-              _fastPath(offset <= size - count) else {
+        guard _fastPath(_isInBounds(offset, length: count, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         data.withUnsafeBytes { buffer in
@@ -185,9 +180,7 @@ extension ConcatenatedMemoryMappedFile {
     @inlinable @inline(__always)
     public func read<T>(offset: Int, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
-        guard _fastPath(offset >= 0),
-              _fastPath(length <= size),
-              _fastPath(offset <= size - length) else {
+        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         return ptr.advanced(by: offset)
@@ -199,9 +192,7 @@ extension ConcatenatedMemoryMappedFile {
     public func write<T>(_ value: T, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let length = MemoryLayout<T>.size
-        guard _fastPath(offset >= 0),
-              _fastPath(length <= size),
-              _fastPath(offset <= size - length) else {
+        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         ptr.advanced(by: offset)
@@ -218,10 +209,7 @@ extension ConcatenatedMemoryMappedFile {
         offset: Int,
         length: Int
     ) throws -> FileSlice {
-        guard _fastPath(offset >= 0),
-              _fastPath(length >= 0),
-              _fastPath(length <= size),
-              _fastPath(offset <= size - length) else {
+        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         return .init(
