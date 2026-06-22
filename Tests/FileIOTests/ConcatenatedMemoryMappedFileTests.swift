@@ -10,6 +10,12 @@ import XCTest
 import Darwin
 #elseif canImport(Glibc)
 import Glibc
+#elseif canImport(Musl)
+import Musl
+#elseif canImport(WASILibc)
+import WASILibc
+#elseif canImport(Android)
+import Android
 #endif
 
 final class ConcatenatedMemoryMappedFileTests: XCTestCase {}
