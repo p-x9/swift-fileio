@@ -71,7 +71,9 @@ extension ConcatenatedStreamedFile {
 extension ConcatenatedStreamedFile {
     @inlinable @inline(__always)
     public func readData(offset: Int, length: Int) throws -> Data {
-        guard offset >= 0, length >= 0, offset + length <= size else {
+        guard _fastPath(offset >= 0),
+              _fastPath(length >= 0),
+              _fastPath(offset + length <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -96,7 +98,8 @@ extension ConcatenatedStreamedFile {
     @inlinable @inline(__always)
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard offset >= 0, offset + data.count <= size else {
+        guard _fastPath(offset >= 0),
+              _fastPath(offset + data.count <= size) else {
             throw FileIOError.offsetOutOfBounds
         }
 
