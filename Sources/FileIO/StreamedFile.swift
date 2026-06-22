@@ -42,7 +42,8 @@ extension StreamedFile {
     public func readData(offset: Int, length: Int) throws -> Data {
         guard _fastPath(offset >= 0),
               _fastPath(length >= 0),
-              _fastPath(offset + length <= size) else {
+              _fastPath(length <= size),
+              _fastPath(offset <= size - length) else {
             throw FileIOError.offsetOutOfBounds
         }
         fileHandle.seek(toFileOffset: UInt64(offset))
@@ -51,8 +52,10 @@ extension StreamedFile {
 
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
+        let count = data.count
         guard _fastPath(offset >= 0),
-              _fastPath(offset + data.count <= size) else {
+              _fastPath(count <= size),
+              _fastPath(offset <= size - count) else {
             throw FileIOError.offsetOutOfBounds
         }
         fileHandle.seek(toFileOffset: UInt64(offset))
@@ -98,7 +101,8 @@ extension StreamedFile: ResizableFileIOProtocol {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(offset >= 0),
               _fastPath(length >= 0),
-              _fastPath(offset + length <= size) else {
+              _fastPath(length <= size),
+              _fastPath(offset <= size - length) else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -148,7 +152,8 @@ extension StreamedFile {
     ) throws -> FileSlice {
         guard _fastPath(offset >= 0),
               _fastPath(length >= 0),
-              _fastPath(offset + length <= size) else {
+              _fastPath(length <= size),
+              _fastPath(offset <= size - length) else {
             throw FileIOError.offsetOutOfBounds
         }
         return try .init(
@@ -175,7 +180,8 @@ extension StreamedFile {
     ) throws -> FileSlice {
         guard _fastPath(offset >= 0),
               _fastPath(length >= 0),
-              _fastPath(offset + length <= size) else {
+              _fastPath(length <= size),
+              _fastPath(offset <= size - length) else {
             throw FileIOError.offsetOutOfBounds
         }
         return try .init(
@@ -235,7 +241,8 @@ extension StreamedFileSlice {
     public func readData(offset: Int, length: Int) throws -> Data {
         guard _fastPath(offset >= 0),
               _fastPath(length >= 0),
-              _fastPath(offset + length <= size) else {
+              _fastPath(length <= size),
+              _fastPath(offset <= size - length) else {
             throw FileIOError.offsetOutOfBounds
         }
         switch mode {
@@ -252,15 +259,17 @@ extension StreamedFileSlice {
 
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
+        let count = data.count
         guard _fastPath(offset >= 0),
-              _fastPath(offset + data.count <= size) else {
+              _fastPath(count <= size),
+              _fastPath(offset <= size - count) else {
             throw FileIOError.offsetOutOfBounds
         }
         switch mode {
         case .direct:
             try parent.writeData(data, at: baseOffset + offset)
         case .buffered:
-            buffer?.replaceSubrange(offset..<offset + data.count, with: data)
+            buffer?.replaceSubrange(offset..<offset + count, with: data)
         }
     }
 
@@ -309,7 +318,8 @@ extension StreamedFileSlice: ResizableFileIOProtocol where Parent: ResizableFile
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(offset >= 0),
               _fastPath(length >= 0),
-              _fastPath(offset + length <= size) else {
+              _fastPath(length <= size),
+              _fastPath(offset <= size - length) else {
             throw FileIOError.offsetOutOfBounds
         }
 

@@ -106,6 +106,28 @@ extension MemoryMappedFileTests {
             }
         }
     }
+
+    func testReadDataOverflowingOffset() throws {
+        try withTemporaryFile(size: 8) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: false)
+            XCTAssertThrowsError(
+                try file.readData(offset: .max, length: 1)
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+            }
+        }
+    }
+
+    func testReadTypedOverflowingOffset() throws {
+        try withTemporaryFile(size: 8) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: false)
+            XCTAssertThrowsError(
+                try file.read(offset: .max, as: UInt32.self)
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+            }
+        }
+    }
 }
 
 extension MemoryMappedFileTests {
