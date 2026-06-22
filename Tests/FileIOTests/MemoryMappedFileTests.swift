@@ -72,6 +72,40 @@ extension MemoryMappedFileTests {
             }
         }
     }
+
+    func testReadTypedNegativeOffset() throws {
+        try withTemporaryFile(size: 8) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: false)
+            XCTAssertThrowsError(
+                try file.read(offset: -1, as: UInt32.self)
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+            }
+        }
+    }
+
+    func testWriteTypedNegativeOffset() throws {
+        try withTemporaryFile(size: 8) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            XCTAssertThrowsError(
+                try file.write(UInt32(0), at: -1)
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+            }
+        }
+    }
+
+    func testSliceWriteTypedNegativeOffset() throws {
+        try withTemporaryFile(size: 16) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            let slice = try file.fileSlice(offset: 4, length: 8)
+            XCTAssertThrowsError(
+                try slice.write(UInt32(0), at: -1)
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+            }
+        }
+    }
 }
 
 extension MemoryMappedFileTests {
