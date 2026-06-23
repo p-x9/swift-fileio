@@ -128,6 +128,27 @@ extension MemoryMappedFileTests {
             }
         }
     }
+
+    func testWriteEmptyData() throws {
+        let initial = Data([1, 2, 3, 4])
+        try withTemporaryFile(size: initial.count, contents: initial) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            try file.writeData(Data(), at: 2)
+            file.sync()
+            XCTAssertEqual(try Data(contentsOf: url), initial)
+        }
+    }
+
+    func testInsertEmptyData() throws {
+        let initial = Data([1, 2, 3, 4])
+        try withTemporaryFile(size: initial.count, contents: initial) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            try file.insertData(Data(), at: 2)
+            file.sync()
+            XCTAssertEqual(file.size, initial.count)
+            XCTAssertEqual(try Data(contentsOf: url), initial)
+        }
+    }
 }
 
 extension MemoryMappedFileTests {

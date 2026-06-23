@@ -54,4 +54,18 @@ extension ConcatenatedMemoryMappedFileTests {
             }
         }
     }
+
+    func testWriteEmptyData() throws {
+        let size = Self.pageSize
+        let initial = Data(repeating: 0xAB, count: size)
+        try withTemporaryFile(size: size, contents: initial) { url in
+            let file = try ConcatenatedMemoryMappedFile.open(
+                url: url,
+                isWritable: true
+            )
+            try file.writeData(Data(), at: 16)
+            file.sync()
+            XCTAssertEqual(try Data(contentsOf: url), initial)
+        }
+    }
 }
