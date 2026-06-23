@@ -121,8 +121,11 @@ extension _FileIOProtocol {
         offset: Int,
         upToCount count: Int
     ) throws -> Data {
-        let size = min(count, size - offset)
-        return try readData(offset: offset, length: size)
+        guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        let length = min(count, size - offset)
+        return try readData(offset: offset, length: length)
     }
 
     /// Reads the entire contents of the file.

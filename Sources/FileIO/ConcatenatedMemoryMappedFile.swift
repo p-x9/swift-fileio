@@ -125,7 +125,7 @@ extension ConcatenatedMemoryMappedFile {
     @inlinable @inline(__always)
     public func _file(for offset: Int) throws -> FileSegment {
         guard let file = _files.first(
-            where: { $0.offset <= offset && offset < $0.offset + $0.size }
+            where: { _isInBounds(offset &- $0.offset, length: 1, in: $0.size) }
         ) else {
             throw FileIOError.offsetOutOfBounds
         }
