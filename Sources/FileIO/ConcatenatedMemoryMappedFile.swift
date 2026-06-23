@@ -149,6 +149,7 @@ extension ConcatenatedMemoryMappedFile {
         guard _fastPath(_isInBounds(offset, length: count, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
+        guard count > 0 else { return }
         data.withUnsafeBytes { buffer in
             memcpy(ptr.advanced(by: offset), buffer.baseAddress!, count)
             msync(ptr.advanced(by: offset), count, MS_SYNC)

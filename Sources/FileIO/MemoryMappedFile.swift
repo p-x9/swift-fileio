@@ -92,6 +92,7 @@ extension MemoryMappedFile {
         guard _fastPath(_isInBounds(offset, length: count, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
+        guard count > 0 else { return }
         data.withUnsafeBytes { buffer in
             memcpy(ptr.advanced(by: offset), buffer.baseAddress!, count)
             msync(ptr.advanced(by: offset), count, MS_SYNC)
@@ -137,16 +138,18 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
+        let count = data.count
+        guard count > 0 else { return }
 
-        let newSize = size + data.count
+        let newSize = size + count
         try resize(newSize: newSize)
 
-        let tailSize = size - offset - data.count
-        memmove(ptr.advanced(by: offset + data.count), ptr.advanced(by: offset), tailSize)
+        let tailSize = size - offset - count
+        memmove(ptr.advanced(by: offset + count), ptr.advanced(by: offset), tailSize)
 
         data.withUnsafeBytes { buffer in
-            memcpy(ptr.advanced(by: offset), buffer.baseAddress!, data.count)
-            msync(ptr.advanced(by: offset), data.count + tailSize, MS_SYNC)
+            memcpy(ptr.advanced(by: offset), buffer.baseAddress!, count)
+            msync(ptr.advanced(by: offset), count + tailSize, MS_SYNC)
         }
     }
 
