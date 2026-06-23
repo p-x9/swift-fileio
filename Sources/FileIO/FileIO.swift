@@ -8,6 +8,20 @@ public enum FileIOError: Error {
     case notWritable
 }
 
+/// Single-comparison bounds check that rejects negative `offset`/`length`
+/// and any `offset + length` that would exceed `size`, without going through
+/// signed overflow that could trap. Negative `Int` becomes a huge `UInt`
+/// via `bitPattern`, so it fails the `<= size` comparison naturally.
+/// `size` is assumed non-negative.
+@usableFromInline
+@inlinable
+@inline(__always)
+internal func _isInBounds(_ offset: Int, length: Int, in size: Int) -> Bool {
+    let usize = UInt(bitPattern: size)
+    return UInt(bitPattern: offset) <= usize
+        && UInt(bitPattern: length) <= usize &- UInt(bitPattern: offset)
+}
+
 public protocol _FileIOProtocol {
     var size: Int { get }
 
@@ -107,8 +121,11 @@ extension _FileIOProtocol {
         offset: Int,
         upToCount count: Int
     ) throws -> Data {
-        let size = min(count, size - offset)
-        return try readData(offset: offset, length: size)
+        guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        let length = min(count, size - offset)
+        return try readData(offset: offset, length: length)
     }
 
     /// Reads the entire contents of the file.

@@ -59,7 +59,7 @@ extension ConcatenatedStreamedFile {
     @inlinable @inline(__always)
     public func _file(for offset: Int) throws -> FileSegment {
         guard let file = _files.first(
-            where: { $0.offset <= offset && offset < $0.offset + $0.size }
+            where: { _isInBounds(offset &- $0.offset, length: 1, in: $0.size) }
         ) else {
             throw FileIOError.offsetOutOfBounds
         }
@@ -71,7 +71,7 @@ extension ConcatenatedStreamedFile {
 extension ConcatenatedStreamedFile {
     @inlinable @inline(__always)
     public func readData(offset: Int, length: Int) throws -> Data {
-        guard offset >= 0, length >= 0, offset + length <= size else {
+        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -96,11 +96,12 @@ extension ConcatenatedStreamedFile {
     @inlinable @inline(__always)
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard offset >= 0, offset + data.count <= size else {
+        let count = data.count
+        guard _fastPath(_isInBounds(offset, length: count, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
 
-        var remaining = data.count
+        var remaining = count
         var currentOffset = offset
         var written = 0
 
@@ -161,9 +162,7 @@ extension ConcatenatedStreamedFile {
         offset: Int,
         length: Int
     ) throws -> FileSlice {
-        guard _fastPath(offset >= 0),
-              _fastPath(length >= 0),
-              _fastPath(offset + length <= size) else {
+        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         return try .init(
@@ -188,9 +187,7 @@ extension ConcatenatedStreamedFile {
         length: Int,
         mode: FileSlice.Mode
     ) throws -> FileSlice {
-        guard _fastPath(offset >= 0),
-              _fastPath(length >= 0),
-              _fastPath(offset + length <= size) else {
+        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         return try .init(
