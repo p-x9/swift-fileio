@@ -134,8 +134,7 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
     @inlinable @inline(__always)
     public func insertData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard _fastPath(offset >= 0),
-              _fastPath(offset <= size) else {
+        guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -280,8 +279,7 @@ extension MemoryMappedFileSlice {
 extension MemoryMappedFileSlice: ResizableFileIOProtocol where Parent: ResizableFileIOProtocol {
     public func insertData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard _fastPath(offset >= 0),
-              _fastPath(offset <= size) else {
+        guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
 

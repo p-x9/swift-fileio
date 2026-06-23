@@ -79,8 +79,7 @@ extension StreamedFile: ResizableFileIOProtocol {
 
     public func insertData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard _fastPath(offset >= 0),
-              _fastPath(offset <= size) else {
+        guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -282,8 +281,7 @@ extension StreamedFileSlice {
 extension StreamedFileSlice: ResizableFileIOProtocol where Parent: ResizableFileIOProtocol {
     public func insertData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard _fastPath(offset >= 0),
-              _fastPath(offset <= size) else {
+        guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
 
