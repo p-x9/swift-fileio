@@ -133,3 +133,27 @@ jobs:
 
       - name: Build
         run: swift build -v --swift-sdk ${{ matrix.target.sdk }} ${{ matrix.target.build-option }}
+
+  windows-build:
+    name: Windows (${{ matrix.tag }})
+    runs-on: windows-2025
+    # Visibility only. Windows has no mmap, so MemoryMappedFile and
+    # ConcatenatedMemoryMappedFile are not expected to compile. This job
+    # exists to measure what actually breaks -- in particular whether the
+    # FileHandle-based StreamedFile types build unchanged -- rather than
+    # guess at it while planning Windows support.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [windowsservercore-ltsc2022]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          $version = (Get-Content .swift-version).Trim()
+          $image = "swift:$version-${{ matrix.tag }}"
+          docker run --rm $image swift --version
+          docker run --rm -v "${{ github.workspace }}:C:\workspace" -w "C:\workspace" $image swift build -v
