@@ -52,21 +52,25 @@ internal func _openFileDescriptor(
     isWritable: Bool
 ) throws -> Int32 {
     let flags = isWritable ? O_RDWR : O_RDONLY
-    // Both failures are raised inside the closure, while `errno` still
-    // belongs to the `open` call just made. A missing file system
-    // representation is kept out of `errno` altogether: no system call runs
-    // for it, so `errno` would hold whatever unrelated value was already
-    // there.
-    return try url.withUnsafeFileSystemRepresentation { path in
-        guard let path else {
-            throw FileIOError.notAFileURL
-        }
-        let fd = _systemOpen(path, flags)
-        guard _fastPath(fd >= 0) else {
-            throw _currentSystemError()
-        }
-        return fd
+
+    // getFileSystemRepresentation, not withUnsafeFileSystemRepresentation:
+    // the latter yields nil on Darwin for a URL with no representation, but
+    // traps on corelibs Foundation ("URL cannot be expressed in the
+    // filesystem representation; use getFileSystemRepresentation to handle
+    // this case"). This one reports failure the same way everywhere.
+    var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+    guard (url as NSURL).getFileSystemRepresentation(
+        &buffer, maxLength: buffer.count
+    ) else {
+        throw FileIOError.notAFileURL
     }
+
+    let fd = _systemOpen(buffer, flags)
+    guard _fastPath(fd >= 0) else {
+        // Read while errno still belongs to the open call above.
+        throw _currentSystemError()
+    }
+    return fd
 }
 
 /// `mmap`, returning `nil` instead of the platform's failure sentinel.
