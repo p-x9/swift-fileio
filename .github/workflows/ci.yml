@@ -65,11 +65,11 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - name: musl (x86_64)
+          - name: Static Linux / musl (x86_64)
             bundle: static-linux-0.1.0
             sdk: x86_64-swift-linux-musl
             checksum: 3fd798bef6f4408f1ea5a6f94ce4d4052830c4326ab85ebc04f983f01b3da407
-          - name: musl (aarch64)
+          - name: Static Linux / musl (aarch64)
             bundle: static-linux-0.1.0
             sdk: aarch64-swift-linux-musl
             checksum: 3fd798bef6f4408f1ea5a6f94ce4d4052830c4326ab85ebc04f983f01b3da407
