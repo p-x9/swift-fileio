@@ -133,3 +133,32 @@ jobs:
 
       - name: Build
         run: swift build -v --swift-sdk ${{ matrix.target.sdk }} ${{ matrix.target.build-option }}
+
+  windows-build:
+    name: Windows
+    runs-on: windows-2025
+    # Visibility only. MemoryMappedFile and ConcatenatedMemoryMappedFile do
+    # not compile: Windows has no mmap/munmap/msync/ftruncate and none of the
+    # MAP_*/PROT_*/MS_SYNC constants. The FileHandle-based StreamedFile types
+    # and FileIO.swift do build clean, so this job tracks that the Windows gap
+    # stays confined to the two mapping types.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read .swift-version
+        id: swift-version
+        shell: bash
+        run: echo "version=$(cat .swift-version | xargs)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Swift
+        uses: SwiftyLab/setup-swift@v1.14.0
+        with:
+          swift-version: ${{ steps.swift-version.outputs.version }}
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Build
+        run: swift build -v
