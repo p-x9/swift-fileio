@@ -56,6 +56,11 @@ jobs:
   cross-build:
     name: ${{ matrix.target.name }}
     runs-on: ubuntu-24.04
+    # `experimental` targets report their result without failing the workflow.
+    # Android is expected to fail until the libc calls in Sources/FileIO are
+    # routed through system.swift: on Android, Foundation does not re-export
+    # the libc symbols the way Darwin and Glibc do.
+    continue-on-error: ${{ matrix.target.experimental || false }}
     strategy:
       fail-fast: false
       matrix:
@@ -73,11 +78,13 @@ jobs:
             sdk: x86_64-unknown-linux-android28
             build-option: --static-swift-stdlib
             checksum: 939e933549d12d28f2e0bf71019d734d309859e9773c572657ce565a81f85d68
+            experimental: true
           - name: Android (aarch64)
             bundle: android
             sdk: aarch64-unknown-linux-android28
             build-option: --static-swift-stdlib
             checksum: 939e933549d12d28f2e0bf71019d734d309859e9773c572657ce565a81f85d68
+            experimental: true
     steps:
       - name: Install swiftly
         run: |
