@@ -3,9 +3,28 @@
 
 import Foundation
 
-public enum FileIOError: Error {
+public enum FileIOError: Error, Equatable {
     case offsetOutOfBounds
     case notWritable
+
+    /// A platform call failed. `code` is the platform's raw error number
+    /// (`errno` on POSIX).
+    ///
+    /// Replaces the `POSIXError` this module used to throw. `POSIXError` was
+    /// constructed as `POSIXError(.init(rawValue: errno)!)`, which traps for
+    /// any error number Foundation does not model, and it ties the thrown
+    /// type to Foundation on platforms where that is not a given.
+    case system(code: Int32)
+}
+
+extension FileIOError: CustomStringConvertible {
+    public var description: String {
+        switch self {
+        case .offsetOutOfBounds: "offset out of bounds"
+        case .notWritable: "file is not writable"
+        case .system(let code): "system error \(code)"
+        }
+    }
 }
 
 /// Single-comparison bounds check that rejects negative `offset`/`length`

@@ -8,6 +8,21 @@
 
 import Foundation
 
+// Needed for mmap and friends. Foundation re-exports libc on Darwin and
+// Glibc, but not on Android or Windows, so relying on that leaves every
+// unqualified libc name here unresolved on those platforms.
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#elseif canImport(WASILibc)
+import WASILibc
+#elseif canImport(Android)
+import Android
+#endif
+
 public final class MemoryMappedFile: MemoryMappedFileIOProtocol {
     @_spi(Core)
     public var fileDescriptor: Int32
@@ -38,15 +53,12 @@ public final class MemoryMappedFile: MemoryMappedFileIOProtocol {
 
 extension MemoryMappedFile {
     public static func open(url: URL, isWritable: Bool) throws -> MemoryMappedFile {
-        let fd = _open(url.path, isWritable ? O_RDWR : O_RDONLY)
-        guard _fastPath(fd > 0) else {
-            throw POSIXError(.init(rawValue: errno)!)
-        }
+        let fd = try _openFileDescriptor(at: url, isWritable: isWritable)
 
         let fileSize = lseek(fd, 0, SEEK_END)
         guard _fastPath(fileSize >= 0) else {
             close(fd)
-            throw POSIXError(.init(rawValue: errno)!)
+            throw _currentSystemError()
         }
 
         guard _fastPath(fileSize > 0) else {
@@ -64,7 +76,7 @@ extension MemoryMappedFile {
         guard let ptr,
               _fastPath(ptr != MAP_FAILED) else {
             close(fd)
-            throw POSIXError(.init(rawValue: errno)!)
+            throw _currentSystemError()
         }
 
         return .init(
@@ -115,7 +127,7 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         guard _fastPath(newSize >= 0) else { return }
 
         guard ftruncate(fileDescriptor, off_t(newSize)) == 0 else {
-            throw POSIXError(.init(rawValue: errno)!)
+            throw _currentSystemError()
         }
 
         unmap()
@@ -125,7 +137,7 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         let ptr = mmap(nil, newSize, prot, MAP_SHARED, fileDescriptor, 0)
         guard let ptr,
               ptr != MAP_FAILED else {
-            throw POSIXError(.init(rawValue: errno)!)
+            throw _currentSystemError()
         }
 
         self.ptr = ptr
