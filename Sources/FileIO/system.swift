@@ -38,34 +38,24 @@ private let _systemOpen = Android.open(_:_:)
 
 /// Opens `url` and returns its file descriptor.
 ///
-/// Both platform concerns of opening a file live here: converting a `URL` to
-/// the bytes the platform expects, and the `open` call itself.
+/// The `open` call is centralized here so that a platform whose `open`
+/// differs -- Windows, whose CRT `_open` is variadic and cannot be imported
+/// -- needs a branch in this file and nowhere else.
 ///
-/// The path is taken from the file system representation rather than
-/// `url.path`, which loses information for paths that are not valid UTF-8.
+/// Deliberately still goes through `url.path`. Reading the file system
+/// representation instead is tempting, but every route to it is worse:
+/// `withUnsafeFileSystemRepresentation` yields nil on Darwin and *traps* on
+/// corelibs Foundation, and `NSURL.getFileSystemRepresentation` relies on a
+/// `URL`-to-`NSURL` cast that later Apple platforms break. `url.path` also
+/// keeps `errno` meaningful on every failure, because `open` always runs.
 ///
-/// - Throws: `FileIOError.notAFileURL` if `url` has no file system
-///   representation, or `FileIOError.system` carrying the platform error
-///   number if `open` fails.
+/// - Throws: `FileIOError.system` carrying the platform error number.
 internal func _openFileDescriptor(
     at url: URL,
     isWritable: Bool
 ) throws -> Int32 {
     let flags = isWritable ? O_RDWR : O_RDONLY
-
-    // getFileSystemRepresentation, not withUnsafeFileSystemRepresentation:
-    // the latter yields nil on Darwin for a URL with no representation, but
-    // traps on corelibs Foundation ("URL cannot be expressed in the
-    // filesystem representation; use getFileSystemRepresentation to handle
-    // this case"). This one reports failure the same way everywhere.
-    var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
-    guard (url as NSURL).getFileSystemRepresentation(
-        &buffer, maxLength: buffer.count
-    ) else {
-        throw FileIOError.notAFileURL
-    }
-
-    let fd = _systemOpen(buffer, flags)
+    let fd = _systemOpen(url.path, flags)
     guard _fastPath(fd >= 0) else {
         // Read while errno still belongs to the open call above.
         throw _currentSystemError()

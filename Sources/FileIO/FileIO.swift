@@ -7,13 +7,6 @@ public enum FileIOError: Error, Equatable {
     case offsetOutOfBounds
     case notWritable
 
-    /// The URL has no file system representation, so there is nothing to
-    /// open -- it is not a file URL.
-    ///
-    /// Distinct from `system` on purpose: no system call runs in this case,
-    /// so there is no meaningful error number to report.
-    case notAFileURL
-
     /// A platform call failed. `code` is the platform's raw error number
     /// (`errno` on POSIX).
     ///
@@ -29,7 +22,6 @@ extension FileIOError: CustomStringConvertible {
         switch self {
         case .offsetOutOfBounds: "offset out of bounds"
         case .notWritable: "file is not writable"
-        case .notAFileURL: "URL is not a file URL"
         case .system(let code): "system error \(code)"
         }
     }
