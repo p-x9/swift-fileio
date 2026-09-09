@@ -87,7 +87,12 @@ extension ConcatenatedMemoryMappedFile {
         for (fd, size) in fdAndSizes {
             let size: Int = numericCast(size)
             let ptr = basePtr.advanced(by: offset)
-            let mappedPtr = mmap(ptr, size, prot, MAP_FIXED | MAP_PRIVATE, fd, 0)
+            // MAP_SHARED, not MAP_PRIVATE: a private mapping keeps writes in
+            // copy-on-write pages that never reach the file, and msync is a
+            // no-op for it, so writes would be silently lost. The anonymous
+            // reservation above stays private -- it only holds the address
+            // range these segments are then mapped into.
+            let mappedPtr = mmap(ptr, size, prot, MAP_FIXED | MAP_SHARED, fd, 0)
             guard ptr == mappedPtr,
                   _fastPath(ptr != MAP_FAILED) else {
                 cleanup(fds: fdAndSizes.map(\.fd))
