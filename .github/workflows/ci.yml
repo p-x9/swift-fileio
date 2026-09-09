@@ -117,14 +117,12 @@ jobs:
             "https://download.swift.org/swift-${VERSION}-release/${SDK_DIR}/swift-${VERSION}-RELEASE/swift-${VERSION}-RELEASE_${BUNDLE}.artifactbundle.tar.gz" \
             --checksum ${{ matrix.target.checksum }}
 
-      - name: Set up Android NDK
+      - name: Link the Android SDK against the runner's NDK
         if: matrix.target.bundle == 'android'
         run: |
-          mkdir -p ~/android-ndk
-          cd ~/android-ndk
-          curl -fSLO "https://dl.google.com/android/repository/android-ndk-r27d-linux.zip"
-          unzip -q android-ndk-r27d-*.zip
-          echo "ANDROID_NDK_HOME=$PWD/android-ndk-r27d" >> $GITHUB_ENV
+          # The ubuntu runner image already ships an Android NDK, which
+          # setup-android-sdk.sh locates on its own; the script echoes which
+          # one it linked, so a future image bump shows up in this log.
           SWIFT_SDKS_DIR=$(find "$HOME" -maxdepth 5 -type d -name "swift-sdks" 2>/dev/null | head -n 1)
           if [ -z "$SWIFT_SDKS_DIR" ]; then
             echo "Error: swift-sdks directory not found"
