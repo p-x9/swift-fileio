@@ -44,20 +44,29 @@ private let _systemOpen = Android.open(_:_:)
 /// The path is taken from the file system representation rather than
 /// `url.path`, which loses information for paths that are not valid UTF-8.
 ///
-/// - Throws: `FileIOError.system` carrying the platform error number.
+/// - Throws: `FileIOError.notAFileURL` if `url` has no file system
+///   representation, or `FileIOError.system` carrying the platform error
+///   number if `open` fails.
 internal func _openFileDescriptor(
     at url: URL,
     isWritable: Bool
 ) throws -> Int32 {
     let flags = isWritable ? O_RDWR : O_RDONLY
-    let fd = url.withUnsafeFileSystemRepresentation { path -> Int32 in
-        guard let path else { return -1 }
-        return _systemOpen(path, flags)
+    // Both failures are raised inside the closure, while `errno` still
+    // belongs to the `open` call just made. A missing file system
+    // representation is kept out of `errno` altogether: no system call runs
+    // for it, so `errno` would hold whatever unrelated value was already
+    // there.
+    return try url.withUnsafeFileSystemRepresentation { path in
+        guard let path else {
+            throw FileIOError.notAFileURL
+        }
+        let fd = _systemOpen(path, flags)
+        guard _fastPath(fd >= 0) else {
+            throw _currentSystemError()
+        }
+        return fd
     }
-    guard _fastPath(fd >= 0) else {
-        throw _currentSystemError()
-    }
-    return fd
 }
 
 /// `mmap`, returning `nil` instead of the platform's failure sentinel.

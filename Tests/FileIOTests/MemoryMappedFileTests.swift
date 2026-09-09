@@ -49,6 +49,23 @@ extension MemoryMappedFileTests {
             XCTAssertEqual(error as? FileIOError, .system(code: ENOENT))
         }
     }
+
+    /// A URL with no file system representation reaches `open` without any
+    /// system call being made, so reporting `errno` would surface whatever
+    /// unrelated value happened to be there.
+    ///
+    /// `file://` is the case worth pinning: `isFileURL` is `true`, yet the
+    /// representation is still nil because the path is empty.
+    func testOpenURLWithoutFileSystemRepresentation() throws {
+        for url in [URL(string: "file://")!, URL(string: "mailto:a@b.com")!] {
+            XCTAssertThrowsError(
+                try MemoryMappedFile.open(url: url, isWritable: false),
+                "\(url)"
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .notAFileURL, "\(url)")
+            }
+        }
+    }
 }
 
 extension MemoryMappedFileTests {
