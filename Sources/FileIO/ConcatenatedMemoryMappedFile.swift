@@ -82,16 +82,14 @@ extension ConcatenatedMemoryMappedFile {
 
         let fullSize = fdAndSizes.reduce(0, { $0 + $1.size })
 
-        let basePtr = mmap(
+        guard let basePtr = _memoryMap(
             nil,
             numericCast(fullSize),
             PROT_NONE,
             MAP_PRIVATE | MAP_ANONYMOUS,
             -1,
             0
-        )
-        guard let basePtr,
-              _fastPath(basePtr != MAP_FAILED) else {
+        ) else {
             cleanup(fds: fdAndSizes.map(\.fd))
             throw _currentSystemError()
         }
@@ -109,9 +107,13 @@ extension ConcatenatedMemoryMappedFile {
             // no-op for it, so writes would be silently lost. The anonymous
             // reservation above stays private -- it only holds the address
             // range these segments are then mapped into.
-            let mappedPtr = mmap(ptr, size, prot, MAP_FIXED | MAP_SHARED, fd, 0)
-            guard ptr == mappedPtr,
-                  _fastPath(ptr != MAP_FAILED) else {
+            // The sentinel check is on the result, not on `ptr`: `ptr` is
+            // derived from `basePtr` and can never be MAP_FAILED, so the
+            // previous `ptr != MAP_FAILED` never tested anything.
+            guard let mappedPtr = _memoryMap(
+                      ptr, size, prot, MAP_FIXED | MAP_SHARED, fd, 0
+                  ),
+                  _fastPath(mappedPtr == ptr) else {
                 cleanup(fds: fdAndSizes.map(\.fd))
                 throw _currentSystemError()
             }

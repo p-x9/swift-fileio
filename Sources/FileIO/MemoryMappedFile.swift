@@ -72,9 +72,9 @@ extension MemoryMappedFile {
 
         var prot: Int32 = PROT_READ
         if isWritable { prot |= PROT_WRITE }
-        let ptr = mmap(nil, Int(fileSize), prot, MAP_SHARED, fd, 0)
-        guard let ptr,
-              _fastPath(ptr != MAP_FAILED) else {
+        guard let ptr = _memoryMap(
+            nil, Int(fileSize), prot, MAP_SHARED, fd, 0
+        ) else {
             close(fd)
             throw _currentSystemError()
         }
@@ -134,9 +134,9 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
 
         var prot: Int32 = PROT_READ
         if isWritable { prot |= PROT_WRITE }
-        let ptr = mmap(nil, newSize, prot, MAP_SHARED, fileDescriptor, 0)
-        guard let ptr,
-              ptr != MAP_FAILED else {
+        guard let ptr = _memoryMap(
+            nil, newSize, prot, MAP_SHARED, fileDescriptor, 0
+        ) else {
             throw _currentSystemError()
         }
 

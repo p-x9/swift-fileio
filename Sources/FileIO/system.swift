@@ -60,6 +60,35 @@ internal func _openFileDescriptor(
     return fd
 }
 
+/// `mmap`, returning `nil` instead of the platform's failure sentinel.
+///
+/// Platforms disagree twice about how failure is reported, and both
+/// disagreements are papered over here:
+///
+/// - The result is an implicitly unwrapped optional on Darwin and Glibc, but
+///   non-optional on Android, where `guard let` does not compile.
+/// - `MAP_FAILED` is `((void *) -1)` on Android, a pointer cast Swift's
+///   importer cannot bring across, so the sentinel is rebuilt from its bit
+///   pattern rather than referenced by name.
+///
+/// Every `mmap` call in this module sits in a non-inlinable function, so this
+/// does not need to be `@inlinable`.
+internal func _memoryMap(
+    _ address: UnsafeMutableRawPointer?,
+    _ length: Int,
+    _ protection: Int32,
+    _ flags: Int32,
+    _ fileDescriptor: Int32,
+    _ offset: off_t
+) -> UnsafeMutableRawPointer? {
+    let mapFailed = UnsafeMutableRawPointer(bitPattern: -1)
+    let result: UnsafeMutableRawPointer? = mmap(
+        address, length, protection, flags, fileDescriptor, offset
+    )
+    guard let result, _fastPath(result != mapFailed) else { return nil }
+    return result
+}
+
 /// The platform's current error number, as an error.
 ///
 /// Every read of `errno` in this module goes through here. That matters
