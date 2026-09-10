@@ -9,6 +9,18 @@
 import XCTest
 @testable import FileIO
 
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#elseif canImport(WASILibc)
+import WASILibc
+#elseif canImport(Android)
+import Android
+#endif
+
 final class MemoryMappedFileTests: XCTestCase {}
 
 extension MemoryMappedFileTests {
@@ -23,6 +35,18 @@ extension MemoryMappedFileTests {
         try withTemporaryFile(size: 0) { url in
             let file = try MemoryMappedFile.open(url: url, isWritable: false)
             XCTAssertEqual(file.size, 0)
+        }
+    }
+
+    /// A failing `open` must surface the platform error number instead of
+    /// trapping, which is what `POSIXError(.init(rawValue: errno)!)` did for
+    /// any code Foundation does not model.
+    func testOpenMissingFileThrowsSystemError() throws {
+        let url = URL(fileURLWithPath: "/nonexistent-\(UUID().uuidString)/file")
+        XCTAssertThrowsError(
+            try MemoryMappedFile.open(url: url, isWritable: false)
+        ) { error in
+            XCTAssertEqual(error as? FileIOError, .system(code: ENOENT))
         }
     }
 }

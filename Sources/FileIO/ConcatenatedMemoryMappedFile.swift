@@ -8,6 +8,21 @@
 
 import Foundation
 
+// Needed for mmap and friends. Foundation re-exports libc on Darwin and
+// Glibc, but not on Android or Windows, so relying on that leaves every
+// unqualified libc name here unresolved on those platforms.
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#elseif canImport(WASILibc)
+import WASILibc
+#elseif canImport(Android)
+import Android
+#endif
+
 /// - Warning: Currently, the size of each file must be a multiple of the page size.
 public final class ConcatenatedMemoryMappedFile: MemoryMappedFileIOProtocol {
     public struct FileSegment {
@@ -47,17 +62,19 @@ extension ConcatenatedMemoryMappedFile {
     ) throws -> ConcatenatedMemoryMappedFile {
         var fdAndSizes: [(fd: CInt, size: off_t)] = []
         for url in urls {
-            let fd = _open(url.path, isWritable ? O_RDWR : O_RDONLY)
-            guard _fastPath(fd > 0) else {
+            let fd: Int32
+            do {
+                fd = try _openFileDescriptor(at: url, isWritable: isWritable)
+            } catch {
                 cleanup(fds: fdAndSizes.map(\.fd))
-                throw POSIXError(.init(rawValue: errno)!)
+                throw error
             }
 
             let fileSize = lseek(fd, 0, SEEK_END)
             guard _fastPath(fileSize > 0) else {
                 cleanup(fds: fdAndSizes.map(\.fd))
                 close(fd)
-                throw POSIXError(.init(rawValue: errno)!)
+                throw _currentSystemError()
             }
 
             fdAndSizes.append((fd, fileSize))
@@ -65,18 +82,16 @@ extension ConcatenatedMemoryMappedFile {
 
         let fullSize = fdAndSizes.reduce(0, { $0 + $1.size })
 
-        let basePtr = mmap(
+        guard let basePtr = _memoryMap(
             nil,
             numericCast(fullSize),
             PROT_NONE,
             MAP_PRIVATE | MAP_ANONYMOUS,
             -1,
             0
-        )
-        guard let basePtr,
-              _fastPath(basePtr != MAP_FAILED) else {
+        ) else {
             cleanup(fds: fdAndSizes.map(\.fd))
-            throw POSIXError(.init(rawValue: errno)!)
+            throw _currentSystemError()
         }
 
         var prot: Int32 = PROT_READ
@@ -92,11 +107,15 @@ extension ConcatenatedMemoryMappedFile {
             // no-op for it, so writes would be silently lost. The anonymous
             // reservation above stays private -- it only holds the address
             // range these segments are then mapped into.
-            let mappedPtr = mmap(ptr, size, prot, MAP_FIXED | MAP_SHARED, fd, 0)
-            guard ptr == mappedPtr,
-                  _fastPath(ptr != MAP_FAILED) else {
+            // The sentinel check is on the result, not on `ptr`: `ptr` is
+            // derived from `basePtr` and can never be MAP_FAILED, so the
+            // previous `ptr != MAP_FAILED` never tested anything.
+            guard let mappedPtr = _memoryMap(
+                      ptr, size, prot, MAP_FIXED | MAP_SHARED, fd, 0
+                  ),
+                  _fastPath(mappedPtr == ptr) else {
                 cleanup(fds: fdAndSizes.map(\.fd))
-                throw POSIXError(.init(rawValue: errno)!)
+                throw _currentSystemError()
             }
             files.append(
                 .init(

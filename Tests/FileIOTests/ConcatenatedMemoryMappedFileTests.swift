@@ -25,6 +25,26 @@ extension ConcatenatedMemoryMappedFileTests {
     /// of the page size, so use that for fixtures.
     private static var pageSize: Int { Int(getpagesize()) }
 
+    /// A failing `open` must surface the platform error number instead of
+    /// trapping. The concatenated variant opens in a loop, so this also
+    /// covers the cleanup path for descriptors already opened.
+    func testOpenMissingFileThrowsSystemError() throws {
+        let size = Self.pageSize
+        try withTemporaryFile(size: size) { existing in
+            let missing = URL(
+                fileURLWithPath: "/nonexistent-\(UUID().uuidString)/file"
+            )
+            XCTAssertThrowsError(
+                try ConcatenatedMemoryMappedFile.open(
+                    urls: [existing, missing],
+                    isWritable: false
+                )
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .system(code: ENOENT))
+            }
+        }
+    }
+
     func testReadTypedNegativeOffset() throws {
         let size = Self.pageSize
         try withTemporaryFile(size: size) { url in
