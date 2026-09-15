@@ -63,7 +63,7 @@ extension MemoryMappedFile {
         guard _fastPath(fileSize > 0) else {
             return .init(
                 fileDescriptor: fd,
-                ptr: .allocate(byteCount: 0, alignment: 1),
+                ptr: emptyPlaceholder(),
                 size: 0,
                 isWritable: isWritable
             )
@@ -118,8 +118,20 @@ extension MemoryMappedFile {
         _memorySync(ptr, length: size)
     }
 
+    /// `size == 0` means `ptr` is the placeholder from
+    /// ``emptyPlaceholder()``, not a mapping -- zero-length regions cannot be
+    /// mapped on any platform. Unmapping it would not release it.
     internal func unmap() {
-        _memoryUnmap(ptr, length: size)
+        if size > 0 {
+            _memoryUnmap(ptr, length: size)
+        } else {
+            ptr.deallocate()
+        }
+    }
+
+    /// Stand-in pointer for a file with nothing to map.
+    internal static func emptyPlaceholder() -> UnsafeMutableRawPointer {
+        .allocate(byteCount: 0, alignment: 1)
     }
 }
 
@@ -132,9 +144,16 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         // has a view open on it, with EACCES. POSIX does not mind the order.
         unmap()
 
+        // Nothing is mapped from here on, so record that before anything can
+        // throw. Otherwise a failure below would leave `ptr` addressing the
+        // released view, and deinit would unmap it a second time.
+        self.ptr = Self.emptyPlaceholder()
+        self.size = 0
+
         guard _resizeFile(fileDescriptor, to: newSize) else {
             throw _currentSystemError()
         }
+        guard newSize > 0 else { return }
 
         let ptr = try _memoryMap(
             fileDescriptor: fileDescriptor,
@@ -142,6 +161,7 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
             isWritable: isWritable
         )
 
+        self.ptr.deallocate()
         self.ptr = ptr
         self.size = newSize
     }
