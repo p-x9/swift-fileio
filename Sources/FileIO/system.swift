@@ -63,33 +63,49 @@ internal func _openFileDescriptor(
     return fd
 }
 
-/// `mmap`, returning `nil` instead of the platform's failure sentinel.
+/// Maps `length` bytes of `fileDescriptor` from its start, shared with the
+/// file so that writes reach it, returning `nil` on failure.
 ///
-/// Platforms disagree twice about how failure is reported, and both
-/// disagreements are papered over here:
+/// Takes no protection or flag arguments on purpose: those are POSIX shapes
+/// that a non-POSIX mapping API cannot express, and leaking them into call
+/// sites is what forces every caller to be POSIX-only.
 ///
-/// - The result is an implicitly unwrapped optional on Darwin and Glibc, but
-///   non-optional on Android, where `guard let` does not compile.
-/// - `MAP_FAILED` is `((void *) -1)` on Android, a pointer cast Swift's
-///   importer cannot bring across, so the sentinel is rebuilt from its bit
-///   pattern rather than referenced by name.
-///
-/// Every `mmap` call in this module sits in a non-inlinable function, so this
-/// does not need to be `@inlinable`.
+/// On Android `mmap` returns a non-optional pointer, where `guard let` does
+/// not compile, and `MAP_FAILED` is `((void *) -1)`, a pointer cast Swift
+/// cannot import -- so the sentinel is rebuilt from its bit pattern.
 internal func _memoryMap(
-    _ address: UnsafeMutableRawPointer?,
-    _ length: Int,
-    _ protection: Int32,
-    _ flags: Int32,
-    _ fileDescriptor: Int32,
-    _ offset: off_t
+    fileDescriptor: Int32,
+    length: Int,
+    isWritable: Bool
 ) -> UnsafeMutableRawPointer? {
+    var protection: Int32 = PROT_READ
+    if isWritable { protection |= PROT_WRITE }
+
     let mapFailed = UnsafeMutableRawPointer(bitPattern: -1)
     let result: UnsafeMutableRawPointer? = mmap(
-        address, length, protection, flags, fileDescriptor, offset
+        nil, length, protection, MAP_SHARED, fileDescriptor, 0
     )
     guard let result, _fastPath(result != mapFailed) else { return nil }
     return result
+}
+
+/// Releases a mapping made by ``_memoryMap(fileDescriptor:length:isWritable:)``.
+internal func _memoryUnmap(_ pointer: UnsafeMutableRawPointer, length: Int) {
+    munmap(pointer, length)
+}
+
+/// Flushes `length` bytes of mapped memory at `pointer` to the file.
+///
+/// `@inlinable` because most callers are themselves `@inlinable`, and an
+/// `@inlinable` body cannot reference a plain `internal` declaration.
+@inlinable @inline(__always)
+internal func _memorySync(_ pointer: UnsafeMutableRawPointer, length: Int) {
+    msync(pointer, length, MS_SYNC)
+}
+
+/// Sets the length of `fileDescriptor`, reporting whether it succeeded.
+internal func _resizeFile(_ fileDescriptor: Int32, to newSize: Int) -> Bool {
+    ftruncate(fileDescriptor, off_t(newSize)) == 0
 }
 
 /// The platform's current error number, as an error.

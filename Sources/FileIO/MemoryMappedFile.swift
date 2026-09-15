@@ -8,9 +8,8 @@
 
 import Foundation
 
-// Needed for mmap and friends. Foundation re-exports libc on Darwin and
-// Glibc, but not on Android or Windows, so relying on that leaves every
-// unqualified libc name here unresolved on those platforms.
+// Foundation re-exports libc on Darwin and Glibc but not on Android, so the
+// unqualified libc names below need this.
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -70,10 +69,10 @@ extension MemoryMappedFile {
             )
         }
 
-        var prot: Int32 = PROT_READ
-        if isWritable { prot |= PROT_WRITE }
         guard let ptr = _memoryMap(
-            nil, Int(fileSize), prot, MAP_SHARED, fd, 0
+            fileDescriptor: fd,
+            length: Int(fileSize),
+            isWritable: isWritable
         ) else {
             close(fd)
             throw _currentSystemError()
@@ -107,17 +106,17 @@ extension MemoryMappedFile {
         guard count > 0 else { return }
         data.withUnsafeBytes { buffer in
             memcpy(ptr.advanced(by: offset), buffer.baseAddress!, count)
-            msync(ptr.advanced(by: offset), count, MS_SYNC)
+            _memorySync(ptr.advanced(by: offset), length: count)
         }
     }
 
     @inlinable @inline(__always)
     public func sync() {
-        msync(ptr, size, MS_SYNC)
+        _memorySync(ptr, length: size)
     }
 
     internal func unmap() {
-        munmap(ptr, size)
+        _memoryUnmap(ptr, length: size)
     }
 }
 
@@ -126,16 +125,16 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(newSize >= 0) else { return }
 
-        guard ftruncate(fileDescriptor, off_t(newSize)) == 0 else {
+        guard _resizeFile(fileDescriptor, to: newSize) else {
             throw _currentSystemError()
         }
 
         unmap()
 
-        var prot: Int32 = PROT_READ
-        if isWritable { prot |= PROT_WRITE }
         guard let ptr = _memoryMap(
-            nil, newSize, prot, MAP_SHARED, fileDescriptor, 0
+            fileDescriptor: fileDescriptor,
+            length: newSize,
+            isWritable: isWritable
         ) else {
             throw _currentSystemError()
         }
@@ -161,7 +160,7 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
 
         data.withUnsafeBytes { buffer in
             memcpy(ptr.advanced(by: offset), buffer.baseAddress!, count)
-            msync(ptr.advanced(by: offset), count + tailSize, MS_SYNC)
+            _memorySync(ptr.advanced(by: offset), length: count + tailSize)
         }
     }
 
@@ -214,7 +213,7 @@ extension MemoryMappedFile {
         ptr.advanced(by: offset)
             .assumingMemoryBound(to: T.self)
             .pointee = value
-        msync(ptr.advanced(by: offset), length, MS_SYNC)
+        _memorySync(ptr.advanced(by: offset), length: length)
     }
 }
 
@@ -287,7 +286,7 @@ extension MemoryMappedFileSlice {
 
     @inlinable @inline(__always)
     public func sync() {
-        msync(parent.ptr.advanced(by: baseOffset), size, MS_SYNC)
+        _memorySync(parent.ptr.advanced(by: baseOffset), length: size)
     }
 }
 
@@ -346,6 +345,6 @@ extension MemoryMappedFileSlice {
         ptr.advanced(by: offset)
             .assumingMemoryBound(to: T.self)
             .pointee = value
-        msync(ptr.advanced(by: offset), length, MS_SYNC)
+        _memorySync(ptr.advanced(by: offset), length: length)
     }
 }
