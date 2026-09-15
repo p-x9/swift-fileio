@@ -14,7 +14,7 @@ A Swift library for reading and writing files.
 - [MemoryMappedFile](./Sources/FileIO/MemoryMappedFile.swift): using mmap
 - [StreamedFile](./Sources/FileIO/StreamedFile.swift): using FileHandle (syscall)
 
-- [ConcatenatedMemoryMappedFile](./Sources/FileIO/ConcatenatedMemoryMappedFile.swift): using mmap. Treats multiple files as one continuous virtual file.
+- [ConcatenatedMemoryMappedFile](./Sources/FileIO/ConcatenatedMemoryMappedFile.swift): using mmap. Treats multiple files as one continuous virtual file. Each file is mapped independently and the concatenation is logical, so there is no whole-file pointer and no constraint on the individual file sizes.
 - [StreamedFile](./Sources/FileIO/ConcatenatedStreamedFile.swift): using FileHandle (syscall). Treats multiple files as one continuous virtual file.
 
 ## Usage
@@ -60,6 +60,7 @@ graph TD
 - `FileIOSiliceProtocol` represents a logical view into a file with a `baseOffset`.
 - `ResizableFileIOProtocol` adds structural mutation operations such as insert and delete.
 - `_MemoryMappedFileIOProtocol` and `_StreamedFileIOProtocol` describe low-level implementation traits.
+- `_MemoryMappedFileIOProtocol` requires a pointer to the whole file, so `ConcatenatedMemoryMappedFile` does **not** adopt it: its segments are mapped separately and there is no single base pointer. It exposes `unsafePointer(at:)` instead, which also reports how far the contiguous run extends.
 - `MemoryMappedFileIOProtocol` and `StreamedFileIOProtocol` combine implementation traits with `FileIOProtocol`.
 
 ## License

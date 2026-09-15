@@ -21,8 +21,8 @@ import Android
 final class ConcatenatedMemoryMappedFileTests: XCTestCase {}
 
 extension ConcatenatedMemoryMappedFileTests {
-    /// `ConcatenatedMemoryMappedFile` requires each segment to be a multiple
-    /// of the page size, so use that for fixtures.
+    /// Segments no longer need to be page-size multiples, but keeping some
+    /// fixtures page-sized preserves the original coverage.
     private static var pageSize: Int { Int(getpagesize()) }
 
     /// A failing `open` must surface the platform error number instead of
@@ -169,6 +169,175 @@ extension ConcatenatedMemoryMappedFileTests {
                 second[2..<size],
                 Data(repeating: 0xBB, count: size - 2)
             )
+        }
+    }
+
+    /// The previous implementation reserved one address range and overlaid
+    /// each file with MAP_FIXED, which requires every segment to be a page
+    /// multiple -- unaligned sizes failed with EINVAL. Mapping each file
+    /// separately removes the restriction entirely.
+    func testUnalignedSegmentSizes() throws {
+        let a = Self.pageSize + 100
+        let b = 37
+        let c = Self.pageSize * 2 + 1
+        try withTemporaryFiles(
+            files: [
+                (size: a, contents: Data(repeating: 0xAA, count: a)),
+                (size: b, contents: Data(repeating: 0xBB, count: b)),
+                (size: c, contents: Data(repeating: 0xCC, count: c)),
+            ]
+        ) { urls in
+            let file = try ConcatenatedMemoryMappedFile.open(
+                urls: urls,
+                isWritable: false
+            )
+            XCTAssertEqual(file.size, a + b + c)
+            XCTAssertEqual(try file.readData(offset: a - 1, length: 2), Data([0xAA, 0xBB]))
+            XCTAssertEqual(try file.readData(offset: a + b - 1, length: 2), Data([0xBB, 0xCC]))
+            XCTAssertEqual(
+                try file.readAllData(),
+                Data(repeating: 0xAA, count: a)
+                    + Data(repeating: 0xBB, count: b)
+                    + Data(repeating: 0xCC, count: c)
+            )
+        }
+    }
+
+    /// A read covering three segments end to end.
+    func testReadSpanningMultipleSegments() throws {
+        let size = 64
+        try withTemporaryFiles(
+            files: (0..<3).map { i in
+                (size: size, contents: Data(repeating: UInt8(0x10 + i), count: size))
+            }
+        ) { urls in
+            let file = try ConcatenatedMemoryMappedFile.open(
+                urls: urls,
+                isWritable: false
+            )
+            let read = try file.readData(offset: size - 2, length: size + 4)
+            XCTAssertEqual(
+                read,
+                Data(repeating: 0x10, count: 2)
+                    + Data(repeating: 0x11, count: size)
+                    + Data(repeating: 0x12, count: 2)
+            )
+        }
+    }
+
+    /// `unsafePointer(at:)` must report where the contiguous run ends, since
+    /// reading past it leaves the segment's mapping.
+    func testUnsafePointerReportsContiguousRun() throws {
+        let a = 100
+        let b = 50
+        try withTemporaryFiles(
+            files: [
+                (size: a, contents: Data(repeating: 0xAA, count: a)),
+                (size: b, contents: Data(repeating: 0xBB, count: b)),
+            ]
+        ) { urls in
+            let file = try ConcatenatedMemoryMappedFile.open(
+                urls: urls,
+                isWritable: false
+            )
+
+            let (p0, n0) = try file.unsafePointer(at: 0)
+            XCTAssertEqual(n0, a, "run should stop at the end of segment 0")
+            XCTAssertEqual(p0.load(as: UInt8.self), 0xAA)
+
+            let (p1, n1) = try file.unsafePointer(at: a - 1)
+            XCTAssertEqual(n1, 1, "one byte left in segment 0")
+            XCTAssertEqual(p1.load(as: UInt8.self), 0xAA)
+
+            let (p2, n2) = try file.unsafePointer(at: a)
+            XCTAssertEqual(n2, b, "crossing the seam starts segment 1")
+            XCTAssertEqual(p2.load(as: UInt8.self), 0xBB)
+
+            XCTAssertThrowsError(try file.unsafePointer(at: a + b)) { error in
+                XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+            }
+        }
+    }
+
+    /// A typed value straddling a seam cannot be loaded through one pointer,
+    /// so it has to go through the copying path.
+    func testTypedReadWriteAcrossSegmentBoundary() throws {
+        let size = 64
+        try withTemporaryFiles(
+            files: [
+                (size: size, contents: Data(repeating: 0, count: size)),
+                (size: size, contents: Data(repeating: 0, count: size)),
+            ]
+        ) { urls in
+            let file = try ConcatenatedMemoryMappedFile.open(
+                urls: urls,
+                isWritable: true
+            )
+            // Two bytes before the seam: the UInt32 spans both files.
+            try file.write(UInt32(0xDEADBEEF), at: size - 2)
+            file.sync()
+
+            XCTAssertEqual(try file.read(offset: size - 2, as: UInt32.self), 0xDEADBEEF)
+
+            let first = try Data(contentsOf: urls[0])
+            let second = try Data(contentsOf: urls[1])
+            let rejoined = first[(size - 2)..<size] + second[0..<2]
+            XCTAssertEqual(
+                rejoined.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) },
+                0xDEADBEEF
+            )
+        }
+    }
+
+    func testFileSliceAcrossSegmentBoundary() throws {
+        let size = 32
+        try withTemporaryFiles(
+            files: [
+                (size: size, contents: Data(repeating: 0xAA, count: size)),
+                (size: size, contents: Data(repeating: 0xBB, count: size)),
+            ]
+        ) { urls in
+            let file = try ConcatenatedMemoryMappedFile.open(
+                urls: urls,
+                isWritable: true
+            )
+            let slice = try file.fileSlice(offset: size - 4, length: 8)
+            XCTAssertEqual(slice.size, 8)
+            XCTAssertEqual(
+                try slice.readAllData(),
+                Data(repeating: 0xAA, count: 4) + Data(repeating: 0xBB, count: 4)
+            )
+
+            // The slice's contiguous run is clamped by both the segment and
+            // the slice's own end.
+            let (_, n) = try slice.unsafePointer(at: 0)
+            XCTAssertEqual(n, 4)
+
+            try slice.writeData(Data([1, 2, 3, 4, 5, 6]), at: 1)
+            slice.sync()
+            XCTAssertEqual(
+                try file.readData(offset: size - 3, length: 6),
+                Data([1, 2, 3, 4, 5, 6])
+            )
+        }
+    }
+
+    /// Empty segments used to be rejected with a stale errno; they now just
+    /// contribute nothing.
+    func testEmptySegmentIsSkipped() throws {
+        try withTemporaryFiles(
+            files: [
+                (size: 4, contents: Data([1, 2, 3, 4])),
+                (size: 0, contents: Data()),
+                (size: 4, contents: Data([5, 6, 7, 8])),
+            ]
+        ) { urls in
+            let file = try ConcatenatedMemoryMappedFile.open(
+                urls: urls,
+                isWritable: false
+            )
+            XCTAssertEqual(file.size, 8)
+            XCTAssertEqual(try file.readAllData(), Data([1, 2, 3, 4, 5, 6, 7, 8]))
         }
     }
 }
