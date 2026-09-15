@@ -7,14 +7,26 @@ public enum FileIOError: Error, Equatable {
     case offsetOutOfBounds
     case notWritable
 
-    /// A platform call failed. `code` is the platform's raw error number
-    /// (`errno` on POSIX).
+    /// A platform call failed. `code` is an `errno` value, on every platform
+    /// -- including Windows, whose CRT entry points report that way.
     ///
     /// Replaces the `POSIXError` this module used to throw. `POSIXError` was
     /// constructed as `POSIXError(.init(rawValue: errno)!)`, which traps for
     /// any error number Foundation does not model, and it ties the thrown
     /// type to Foundation on platforms where that is not a given.
     case system(code: Int32)
+
+    /// A Win32 call failed. `code` is a `GetLastError` value.
+    ///
+    /// Separate from ``system(code:)`` because the two numbering schemes
+    /// overlap without agreeing: 5 is `EIO` as an `errno` and
+    /// `ERROR_ACCESS_DENIED` as a Win32 error. Normalizing one into the other
+    /// would need a hand-written table that collapses codes with no
+    /// counterpart, so the domain is kept instead of the information lost.
+    ///
+    /// Only thrown on Windows, but declared everywhere so that a `switch`
+    /// over this type is the same on every platform.
+    case windows(code: UInt32)
 }
 
 extension FileIOError: CustomStringConvertible {
@@ -23,6 +35,7 @@ extension FileIOError: CustomStringConvertible {
         case .offsetOutOfBounds: "offset out of bounds"
         case .notWritable: "file is not writable"
         case .system(let code): "system error \(code)"
+        case .windows(let code): "Win32 error \(code)"
         }
     }
 }

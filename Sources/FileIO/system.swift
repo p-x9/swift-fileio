@@ -115,7 +115,8 @@ internal func _fileSize(_ fileDescriptor: Int32) -> Int64 {
 /// call that failed. On Windows that matters: the mapping APIs report through
 /// `GetLastError`, leaving `errno` holding something unrelated.
 ///
-/// - Throws: `FileIOError.system` carrying the platform error number.
+/// - Throws: `FileIOError.system` on POSIX, `FileIOError.windows` for the
+///   Win32 mapping calls.
 internal func _memoryMap(
     fileDescriptor: Int32,
     length: Int,
@@ -205,10 +206,7 @@ internal func _currentSystemError() -> FileIOError {
 
 #if os(Windows)
 /// `GetLastError` as an error, for the Win32 APIs that do not touch `errno`.
-///
-/// `FileIOError.system(code:)` therefore carries an `errno` value for calls
-/// that came through the CRT and a Win32 error code for those that did not.
 internal func _lastWindowsError() -> FileIOError {
-    .system(code: Int32(bitPattern: GetLastError()))
+    .windows(code: GetLastError())
 }
 #endif
