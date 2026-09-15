@@ -171,7 +171,7 @@ public protocol _SingleMemoryMappedFileIOProtocol: _MemoryMappedFileIOProtocol {
 extension _SingleMemoryMappedFileIOProtocol {
     @inlinable @inline(__always)
     public func unsafeRegion(at offset: Int) throws -> UnsafeContiguousRegion {
-        guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
+        guard _fastPath(_isInBounds(offset, length: 1, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         return .init(pointer: ptr.advanced(by: offset), count: size - offset)

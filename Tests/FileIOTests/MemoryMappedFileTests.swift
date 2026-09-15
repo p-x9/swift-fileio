@@ -274,8 +274,12 @@ extension MemoryMappedFileTests {
             XCTAssertEqual(tail.count, 3)
             XCTAssertEqual(tail.pointer.load(as: UInt8.self), 6)
 
-            XCTAssertThrowsError(try file.unsafeRegion(at: 9)) { error in
-                XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+            for offset in [8, 9, -1] {
+                XCTAssertThrowsError(
+                    try file.unsafeRegion(at: offset), "\(offset)"
+                ) { error in
+                    XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+                }
             }
         }
     }
@@ -297,6 +301,13 @@ extension MemoryMappedFileTests {
             )
             XCTAssertEqual(try firstByte(of: single), 0xAA)
             XCTAssertEqual(try firstByte(of: concatenated), 0xAA)
+
+            // Both must reject `offset == size` the same way.
+            for file in [single as any _MemoryMappedFileIOProtocol, concatenated] {
+                XCTAssertThrowsError(try file.unsafeRegion(at: 4)) { error in
+                    XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+                }
+            }
         }
     }
 }
