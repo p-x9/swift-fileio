@@ -16,11 +16,13 @@ import Foundation
 /// is what lets this type work on platforms with no equivalent of overlaying
 /// a fixed address range.
 ///
-/// The consequence for callers is that there is no whole-file pointer. Use
-/// ``readData(offset:length:)`` and friends, or ``unsafePointer(at:)`` when a
-/// zero-copy read matters -- the latter reports how far the contiguous run
-/// extends, and reading past it is undefined.
-public final class ConcatenatedMemoryMappedFile: FileIOProtocol {
+/// The consequence for callers is that there is no whole-file pointer, which
+/// is why this adopts ``_MemoryMappedFileIOProtocol`` but not
+/// ``_SingleMemoryMappedFileIOProtocol``. Use ``readData(offset:length:)`` and
+/// friends, or ``unsafeRegion(at:)`` when a zero-copy read matters -- the
+/// region reports how far it stays contiguous, and reading past that is
+/// undefined.
+public final class ConcatenatedMemoryMappedFile: MemoryMappedFileIOProtocol {
     public struct FileSegment {
         public let offset: Int
         public let size: Int
@@ -89,25 +91,22 @@ extension ConcatenatedMemoryMappedFile {
         return file
     }
 
-    /// A pointer to the byte at `offset`, and how many bytes stay contiguous
-    /// from there.
+    /// The contiguous run of mapped memory starting at `offset`.
     ///
     /// The segments are mapped separately, so a logical range can span two
-    /// mappings that are nowhere near each other. `contiguousCount` is the
+    /// mappings that are nowhere near each other. The region's `count` is the
     /// only safe extent: reading or writing beyond it walks off the end of
     /// one mapping into memory that has nothing to do with this file.
     ///
     /// - Throws: `FileIOError.offsetOutOfBounds` if `offset` is not within
     ///   the file.
     @inlinable @inline(__always)
-    public func unsafePointer(
-        at offset: Int
-    ) throws -> (pointer: UnsafeMutableRawPointer, contiguousCount: Int) {
+    public func unsafeRegion(at offset: Int) throws -> UnsafeContiguousRegion {
         let segment = try _file(for: offset)
         let localOffset = offset - segment.offset
-        return (
-            segment._file.ptr.advanced(by: localOffset),
-            segment.size - localOffset
+        return .init(
+            pointer: segment._file.ptr.advanced(by: localOffset),
+            count: segment.size - localOffset
         )
     }
 }
@@ -266,7 +265,7 @@ extension ConcatenatedMemoryMappedFile {
 /// Unlike ``MemoryMappedFileSlice`` this cannot be a pointer plus an offset,
 /// because the parent has no single mapping to offset into. Everything is
 /// delegated to the parent, which resolves the segment per access.
-public final class ConcatenatedMemoryMappedFileSlice: FileIOSiliceProtocol {
+public final class ConcatenatedMemoryMappedFileSlice: FileIOSiliceProtocol, _MemoryMappedFileIOProtocol {
     public let parent: ConcatenatedMemoryMappedFile
 
     public private(set) var baseOffset: Int
@@ -288,20 +287,19 @@ public final class ConcatenatedMemoryMappedFileSlice: FileIOSiliceProtocol {
 }
 
 extension ConcatenatedMemoryMappedFileSlice {
-    /// See ``ConcatenatedMemoryMappedFile/unsafePointer(at:)`` -- the
-    /// contiguous run is still bounded by the parent's segments, and is
-    /// additionally clamped to the end of this slice.
+    /// See ``ConcatenatedMemoryMappedFile/unsafeRegion(at:)`` -- the run is
+    /// still bounded by the parent's segments, and is additionally clamped to
+    /// the end of this slice.
     @inlinable @inline(__always)
-    public func unsafePointer(
-        at offset: Int
-    ) throws -> (pointer: UnsafeMutableRawPointer, contiguousCount: Int) {
+    public func unsafeRegion(at offset: Int) throws -> UnsafeContiguousRegion {
         guard _fastPath(_isInBounds(offset, length: 1, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
-        let (pointer, contiguousCount) = try parent.unsafePointer(
-            at: baseOffset + offset
+        let region = try parent.unsafeRegion(at: baseOffset + offset)
+        return .init(
+            pointer: region.pointer,
+            count: min(region.count, size - offset)
         )
-        return (pointer, min(contiguousCount, size - offset))
     }
 
     @inlinable @inline(__always)

@@ -225,9 +225,9 @@ extension ConcatenatedMemoryMappedFileTests {
         }
     }
 
-    /// `unsafePointer(at:)` must report where the contiguous run ends, since
+    /// `unsafeRegion(at:)` must report where the contiguous run ends, since
     /// reading past it leaves the segment's mapping.
-    func testUnsafePointerReportsContiguousRun() throws {
+    func testUnsafeRegionReportsContiguousRun() throws {
         let a = 100
         let b = 50
         try withTemporaryFiles(
@@ -241,19 +241,20 @@ extension ConcatenatedMemoryMappedFileTests {
                 isWritable: false
             )
 
-            let (p0, n0) = try file.unsafePointer(at: 0)
-            XCTAssertEqual(n0, a, "run should stop at the end of segment 0")
-            XCTAssertEqual(p0.load(as: UInt8.self), 0xAA)
+            let r0 = try file.unsafeRegion(at: 0)
+            XCTAssertEqual(r0.count, a, "run should stop at the end of segment 0")
+            XCTAssertEqual(r0.pointer.load(as: UInt8.self), 0xAA)
+            XCTAssertEqual(r0.buffer.count, a)
 
-            let (p1, n1) = try file.unsafePointer(at: a - 1)
-            XCTAssertEqual(n1, 1, "one byte left in segment 0")
-            XCTAssertEqual(p1.load(as: UInt8.self), 0xAA)
+            let r1 = try file.unsafeRegion(at: a - 1)
+            XCTAssertEqual(r1.count, 1, "one byte left in segment 0")
+            XCTAssertEqual(r1.pointer.load(as: UInt8.self), 0xAA)
 
-            let (p2, n2) = try file.unsafePointer(at: a)
-            XCTAssertEqual(n2, b, "crossing the seam starts segment 1")
-            XCTAssertEqual(p2.load(as: UInt8.self), 0xBB)
+            let r2 = try file.unsafeRegion(at: a)
+            XCTAssertEqual(r2.count, b, "crossing the seam starts segment 1")
+            XCTAssertEqual(r2.pointer.load(as: UInt8.self), 0xBB)
 
-            XCTAssertThrowsError(try file.unsafePointer(at: a + b)) { error in
+            XCTAssertThrowsError(try file.unsafeRegion(at: a + b)) { error in
                 XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
             }
         }
@@ -310,8 +311,7 @@ extension ConcatenatedMemoryMappedFileTests {
 
             // The slice's contiguous run is clamped by both the segment and
             // the slice's own end.
-            let (_, n) = try slice.unsafePointer(at: 0)
-            XCTAssertEqual(n, 4)
+            XCTAssertEqual(try slice.unsafeRegion(at: 0).count, 4)
 
             try slice.writeData(Data([1, 2, 3, 4, 5, 6]), at: 1)
             slice.sync()

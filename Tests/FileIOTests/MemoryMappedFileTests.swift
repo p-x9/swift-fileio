@@ -257,3 +257,47 @@ extension MemoryMappedFileTests {
         }
     }
 }
+
+extension MemoryMappedFileTests {
+    /// A single mapping is contiguous to the end of the file, so the default
+    /// implementation on `_SingleMemoryMappedFileIOProtocol` should say so.
+    func testUnsafeRegionSpansRestOfFile() throws {
+        let data = Data([1, 2, 3, 4, 5, 6, 7, 8])
+        try withTemporaryFile(size: data.count, contents: data) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: false)
+
+            let whole = try file.unsafeRegion(at: 0)
+            XCTAssertEqual(whole.count, 8)
+            XCTAssertEqual(whole.pointer, file.ptr)
+
+            let tail = try file.unsafeRegion(at: 5)
+            XCTAssertEqual(tail.count, 3)
+            XCTAssertEqual(tail.pointer.load(as: UInt8.self), 6)
+
+            XCTAssertThrowsError(try file.unsafeRegion(at: 9)) { error in
+                XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+            }
+        }
+    }
+
+    /// Generic code over `_MemoryMappedFileIOProtocol` must work for both a
+    /// single mapping and a segmented one.
+    func testUnsafeRegionThroughProtocol() throws {
+        func firstByte(of file: some _MemoryMappedFileIOProtocol) throws -> UInt8 {
+            try file.unsafeRegion(at: 0).pointer.load(as: UInt8.self)
+        }
+
+        try withTemporaryFiles(
+            files: [(size: 4, contents: Data([0xAA, 0, 0, 0]))]
+        ) { urls in
+            let single = try MemoryMappedFile.open(url: urls[0], isWritable: false)
+            let concatenated = try ConcatenatedMemoryMappedFile.open(
+                urls: urls,
+                isWritable: false
+            )
+            XCTAssertEqual(try firstByte(of: single), 0xAA)
+            XCTAssertEqual(try firstByte(of: concatenated), 0xAA)
+        }
+    }
+}
+

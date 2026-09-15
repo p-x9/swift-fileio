@@ -23,7 +23,7 @@ import WASILibc
 import Android
 #endif
 
-public final class MemoryMappedFile: MemoryMappedFileIOProtocol {
+public final class MemoryMappedFile: MemoryMappedFileIOProtocol, _SingleMemoryMappedFileIOProtocol {
     @_spi(Core)
     public var fileDescriptor: Int32
     public private(set) var ptr: UnsafeMutableRawPointer
@@ -237,7 +237,7 @@ extension MemoryMappedFile {
     }
 }
 
-public class MemoryMappedFileSlice<Parent: MemoryMappedFileIOProtocol>: FileIOSiliceProtocol, _MemoryMappedFileIOProtocol {
+public class MemoryMappedFileSlice<Parent: MemoryMappedFileIOProtocol & _SingleMemoryMappedFileIOProtocol>: FileIOSiliceProtocol, _SingleMemoryMappedFileIOProtocol {
     public let parent: Parent
 
     public private(set) var baseOffset: Int

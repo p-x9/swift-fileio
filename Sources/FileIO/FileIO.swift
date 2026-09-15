@@ -119,8 +119,63 @@ public protocol ResizableFileIOProtocol: _FileIOProtocol {
     func delete(offset: Int, length: Int) throws
 }
 
+/// A run of bytes that is contiguous in memory, and how far it extends.
+///
+/// A memory-mapped file is not necessarily one mapping:
+/// `ConcatenatedMemoryMappedFile` maps each of its files separately, so a
+/// logical range can span two mappings that sit nowhere near each other.
+/// `count` is the extent that is actually safe to touch from `pointer`.
+///
+/// A struct rather than a tuple because this is a protocol requirement, and a
+/// tuple could not gain a field later without breaking every conformance.
+public struct UnsafeContiguousRegion {
+    /// The first byte of the run.
+    public let pointer: UnsafeMutableRawPointer
+
+    /// How many bytes stay contiguous from ``pointer``. Reading or writing
+    /// beyond this leaves the mapping.
+    public let count: Int
+
+    @inlinable
+    public init(pointer: UnsafeMutableRawPointer, count: Int) {
+        self.pointer = pointer
+        self.count = count
+    }
+
+    /// The run as a buffer, which is the bounds-carrying way to consume it.
+    @inlinable
+    public var buffer: UnsafeMutableRawBufferPointer {
+        .init(start: pointer, count: count)
+    }
+}
+
 public protocol _MemoryMappedFileIOProtocol: _FileIOProtocol {
+    /// The contiguous run of mapped memory starting at `offset`.
+    ///
+    /// - Throws: `FileIOError.offsetOutOfBounds` if `offset` is not within
+    ///   the file.
+    func unsafeRegion(at offset: Int) throws -> UnsafeContiguousRegion
+}
+
+/// A mapping that is backed by a single contiguous region, and so can offer a
+/// base pointer for the whole file.
+///
+/// `ConcatenatedMemoryMappedFile` deliberately does not adopt this: it holds
+/// one mapping per file and has no such pointer. Anything that only needs to
+/// read mapped bytes should take ``_MemoryMappedFileIOProtocol`` instead, so
+/// that it works with both.
+public protocol _SingleMemoryMappedFileIOProtocol: _MemoryMappedFileIOProtocol {
     var ptr: UnsafeMutableRawPointer { get }
+}
+
+extension _SingleMemoryMappedFileIOProtocol {
+    @inlinable @inline(__always)
+    public func unsafeRegion(at offset: Int) throws -> UnsafeContiguousRegion {
+        guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        return .init(pointer: ptr.advanced(by: offset), count: size - offset)
+    }
 }
 
 public protocol MemoryMappedFileIOProtocol: _MemoryMappedFileIOProtocol, FileIOProtocol {}
