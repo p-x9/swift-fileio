@@ -138,16 +138,15 @@ extension MemoryMappedFile {
 extension MemoryMappedFile: ResizableFileIOProtocol {
     /// Changes the length of the file and remaps it.
     ///
-    /// - Note: If the file is resized but cannot be mapped afterwards, the
-    ///   change on disk stands and cannot be undone, so the instance is left
-    ///   reporting a size of zero and should not be used again. A failure to
-    ///   resize at all does restore the previous mapping, since the file is
-    ///   untouched in that case.
+    /// - Note: On failure the instance reports a size of zero and must not be
+    ///   used again -- reopen the file instead. Whether the length on disk
+    ///   changed is not knowable from here: `ftruncate` can be interrupted
+    ///   mid-execution and growing writes zeros, so the previous mapping is
+    ///   not restored. Mapping the old length over a file that is no longer
+    ///   that long would read past the end, which faults rather than throws.
     public func resize(newSize: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(newSize >= 0) else { return }
-
-        let oldSize = size
 
         // Unmap before resizing: Windows refuses to shrink a file that still
         // has a view open on it, with EACCES. POSIX does not mind the order.
@@ -160,28 +159,18 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         self.size = 0
 
         guard _resizeFile(fileDescriptor, to: newSize) else {
-            let error = _currentSystemError()
-            // The file still holds its original contents, so put the mapping
-            // back rather than reporting an empty file that is not empty.
-            try? remap(length: oldSize)
-            throw error
+            throw _currentSystemError()
         }
+        guard newSize > 0 else { return }
 
-        try remap(length: newSize)
-    }
-
-    /// Maps `length` bytes over the placeholder, or leaves the empty state in
-    /// place when there is nothing to map.
-    private func remap(length: Int) throws {
-        guard length > 0 else { return }
         let mapped = try _memoryMap(
             fileDescriptor: fileDescriptor,
-            length: length,
+            length: newSize,
             isWritable: isWritable
         )
-        ptr.deallocate()
-        ptr = mapped
-        size = length
+        self.ptr.deallocate()
+        self.ptr = mapped
+        self.size = newSize
     }
 
     @inlinable @inline(__always)
