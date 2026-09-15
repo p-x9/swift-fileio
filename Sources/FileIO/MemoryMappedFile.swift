@@ -136,9 +136,18 @@ extension MemoryMappedFile {
 }
 
 extension MemoryMappedFile: ResizableFileIOProtocol {
+    /// Changes the length of the file and remaps it.
+    ///
+    /// - Note: If the file is resized but cannot be mapped afterwards, the
+    ///   change on disk stands and cannot be undone, so the instance is left
+    ///   reporting a size of zero and should not be used again. A failure to
+    ///   resize at all does restore the previous mapping, since the file is
+    ///   untouched in that case.
     public func resize(newSize: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(newSize >= 0) else { return }
+
+        let oldSize = size
 
         // Unmap before resizing: Windows refuses to shrink a file that still
         // has a view open on it, with EACCES. POSIX does not mind the order.
@@ -151,19 +160,28 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         self.size = 0
 
         guard _resizeFile(fileDescriptor, to: newSize) else {
-            throw _currentSystemError()
+            let error = _currentSystemError()
+            // The file still holds its original contents, so put the mapping
+            // back rather than reporting an empty file that is not empty.
+            try? remap(length: oldSize)
+            throw error
         }
-        guard newSize > 0 else { return }
 
-        let ptr = try _memoryMap(
+        try remap(length: newSize)
+    }
+
+    /// Maps `length` bytes over the placeholder, or leaves the empty state in
+    /// place when there is nothing to map.
+    private func remap(length: Int) throws {
+        guard length > 0 else { return }
+        let mapped = try _memoryMap(
             fileDescriptor: fileDescriptor,
-            length: newSize,
+            length: length,
             isWritable: isWritable
         )
-
-        self.ptr.deallocate()
-        self.ptr = ptr
-        self.size = newSize
+        ptr.deallocate()
+        ptr = mapped
+        size = length
     }
 
     @inlinable @inline(__always)
