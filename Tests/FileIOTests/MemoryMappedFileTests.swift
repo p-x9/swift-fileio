@@ -9,7 +9,9 @@
 import XCTest
 @testable import FileIO
 
-#if canImport(Darwin)
+#if os(Windows)
+import ucrt
+#elseif canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
 import Glibc
@@ -366,6 +368,40 @@ extension MemoryMappedFileTests {
             XCTAssertEqual(file.size, 0)
             XCTAssertEqual(try Data(contentsOf: url), Data())
         }
+    }
+}
+
+extension MemoryMappedFileTests {
+    /// `lseek` is `long` on Windows, 32-bit even in 64-bit builds, so a file
+    /// of 2 GiB or more reports a wrapped or negative size. The dyld shared
+    /// cache this library is used to read is well past that.
+    ///
+    /// Uses a sparse file and reads the size only -- nothing is mapped, so
+    /// this costs no memory and no disk beyond the metadata.
+    func testFileSizeBeyondInt32() throws {
+        let size = Int64(Int32.max) + 4096
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
+            throw XCTSkip("could not create fixture")
+        }
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let handle = try FileHandle(forWritingTo: url)
+        handle.truncateFile(atOffset: UInt64(size))
+        handle.closeFile()
+
+        let reported = try FileManager.default
+            .attributesOfItem(atPath: url.path)[.size] as? NSNumber
+        try XCTSkipUnless(
+            reported?.int64Value == size,
+            "filesystem would not make a \(size) byte sparse file"
+        )
+
+        let fd = try _openFileDescriptor(at: url, isWritable: false)
+        defer { close(fd) }
+        XCTAssertEqual(_fileSize(fd), size)
     }
 }
 

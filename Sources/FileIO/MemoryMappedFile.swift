@@ -54,7 +54,7 @@ extension MemoryMappedFile {
     public static func open(url: URL, isWritable: Bool) throws -> MemoryMappedFile {
         let fd = try _openFileDescriptor(at: url, isWritable: isWritable)
 
-        let fileSize = lseek(fd, 0, SEEK_END)
+        let fileSize = _fileSize(fd)
         guard _fastPath(fileSize >= 0) else {
             close(fd)
             throw _currentSystemError()
@@ -69,11 +69,19 @@ extension MemoryMappedFile {
             )
         }
 
+        // A file can be longer than the address space can describe -- 32-bit
+        // targets such as wasm32 cap out well below what a 64-bit filesystem
+        // reports.
+        guard let length = Int(exactly: fileSize) else {
+            close(fd)
+            throw FileIOError.system(code: EOVERFLOW)
+        }
+
         let ptr: UnsafeMutableRawPointer
         do {
             ptr = try _memoryMap(
                 fileDescriptor: fd,
-                length: Int(fileSize),
+                length: length,
                 isWritable: isWritable
             )
         } catch {
@@ -84,7 +92,7 @@ extension MemoryMappedFile {
         return .init(
             fileDescriptor: fd,
             ptr: ptr,
-            size: Int(fileSize),
+            size: length,
             isWritable: isWritable
         )
     }

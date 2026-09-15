@@ -85,6 +85,20 @@ internal func _openFileDescriptor(
 #endif
 }
 
+/// The length of `fileDescriptor` in bytes, or a negative value on failure.
+///
+/// Not `lseek`: on Windows that is `long lseek(int, long, int)`, 32-bit even
+/// in 64-bit builds, so it cannot describe a file of 2 GiB or more.
+/// `_lseeki64` is the wide form. Returns `Int64` rather than `Int` so the
+/// caller decides what to do when the size does not fit the platform's word.
+internal func _fileSize(_ fileDescriptor: Int32) -> Int64 {
+#if os(Windows)
+    _lseeki64(fileDescriptor, 0, SEEK_END)
+#else
+    Int64(lseek(fileDescriptor, 0, SEEK_END))
+#endif
+}
+
 /// Maps `length` bytes of `fileDescriptor` from its start, shared with the
 /// file so that writes reach it.
 ///
