@@ -128,11 +128,13 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(newSize >= 0) else { return }
 
+        // Unmap before resizing: Windows refuses to shrink a file that still
+        // has a view open on it, with EACCES. POSIX does not mind the order.
+        unmap()
+
         guard _resizeFile(fileDescriptor, to: newSize) else {
             throw _currentSystemError()
         }
-
-        unmap()
 
         let ptr = try _memoryMap(
             fileDescriptor: fileDescriptor,
