@@ -70,8 +70,13 @@ internal func _openFileDescriptor(
     let status = widePath.withUnsafeBufferPointer {
         _wsopen_s(&fd, $0.baseAddress!, flags, _SH_DENYNO, 0)
     }
-    guard _fastPath(status == 0), fd >= 0 else {
+    guard _fastPath(status == 0) else {
         throw FileIOError.system(code: status)
+    }
+    guard fd >= 0 else {
+        // `_wsopen_s` reported success without handing back a descriptor, so
+        // `status` is 0 and would make the error read as "no error".
+        throw FileIOError.system(code: EBADF)
     }
     return fd
 #else
