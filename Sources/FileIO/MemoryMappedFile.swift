@@ -69,13 +69,16 @@ extension MemoryMappedFile {
             )
         }
 
-        guard let ptr = _memoryMap(
-            fileDescriptor: fd,
-            length: Int(fileSize),
-            isWritable: isWritable
-        ) else {
+        let ptr: UnsafeMutableRawPointer
+        do {
+            ptr = try _memoryMap(
+                fileDescriptor: fd,
+                length: Int(fileSize),
+                isWritable: isWritable
+            )
+        } catch {
             close(fd)
-            throw _currentSystemError()
+            throw error
         }
 
         return .init(
@@ -131,13 +134,11 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
 
         unmap()
 
-        guard let ptr = _memoryMap(
+        let ptr = try _memoryMap(
             fileDescriptor: fileDescriptor,
             length: newSize,
             isWritable: isWritable
-        ) else {
-            throw _currentSystemError()
-        }
+        )
 
         self.ptr = ptr
         self.size = newSize
