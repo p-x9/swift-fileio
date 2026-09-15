@@ -167,7 +167,7 @@ internal func _memorySync(_ pointer: UnsafeMutableRawPointer, length: Int) {
 /// Sets the length of `fileDescriptor`, reporting whether it succeeded.
 internal func _resizeFile(_ fileDescriptor: Int32, to newSize: Int) -> Bool {
 #if os(Windows)
-    _chsize_s(fileDescriptor, __int64(newSize)) == 0
+    _chsize_s(fileDescriptor, Int64(newSize)) == 0
 #else
     ftruncate(fileDescriptor, off_t(newSize)) == 0
 #endif
