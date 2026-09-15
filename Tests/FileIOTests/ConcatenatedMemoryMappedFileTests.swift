@@ -23,7 +23,7 @@ final class ConcatenatedMemoryMappedFileTests: XCTestCase {}
 extension ConcatenatedMemoryMappedFileTests {
     /// Segments no longer need to be page-size multiples, but keeping some
     /// fixtures page-sized preserves the original coverage.
-    private static var pageSize: Int { Int(getpagesize()) }
+    private static var pageSize: Int { systemPageSize }
 
     /// A failing `open` must surface the platform error number instead of
     /// trapping. The concatenated variant opens in a loop, so this also
