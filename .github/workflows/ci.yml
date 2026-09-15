@@ -130,10 +130,6 @@ jobs:
   windows-build:
     name: Windows
     runs-on: windows-2025
-    # The mapping layer now compiles here. Still continue-on-error until the
-    # tests have been seen to pass, since a green build says nothing about
-    # whether CreateFileMappingW/MapViewOfFile behave at runtime.
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -154,6 +150,9 @@ jobs:
       - name: Build
         run: swift build -v
 
+      # Separate from `swift test`, which reports a test-build failure on
+      # Windows as a bare "error: fatalError" with the real diagnostic
+      # swallowed.
       - name: Build tests
         run: swift build --build-tests -v
 
