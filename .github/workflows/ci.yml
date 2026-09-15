@@ -154,5 +154,8 @@ jobs:
       - name: Build
         run: swift build -v
 
+      - name: Build tests
+        run: swift build --build-tests -v
+
       - name: Test
-        run: swift test
+        run: swift test -v
