@@ -376,9 +376,11 @@ extension MemoryMappedFileSlice {
         try parent.writeData(data, at: baseOffset + offset)
     }
 
-    /// A stale slice flushes nothing: the bytes it was made from are no
-    /// longer at these offsets, so writing them back would overwrite whatever
-    /// took their place. `sync()` cannot throw, so this is silent.
+    /// A stale slice flushes nothing. There is no snapshot here to write
+    /// back -- this pushes whatever the mapping currently holds -- but after
+    /// a shrink the slice's range falls outside that mapping, and flushing it
+    /// would touch memory the parent no longer has. `sync()` cannot throw, so
+    /// this is silent.
     @inlinable @inline(__always)
     public func sync() {
         guard _fastPath(isValid) else { return }

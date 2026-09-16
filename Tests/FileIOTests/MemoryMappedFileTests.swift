@@ -298,13 +298,21 @@ extension MemoryMappedFileTests {
             try file.resize(newSize: 2)
 
             XCTAssertFalse(tail.isValid)
-            XCTAssertThrowsError(try tail.readData(offset: 0, length: 2))
-            XCTAssertThrowsError(try tail.read(offset: 0, as: UInt16.self))
-            XCTAssertThrowsError(try tail.write(UInt16(0xEEEE), at: 0))
-            XCTAssertThrowsError(try tail.unsafeRegion(at: 0))
+            // Staleness is reported ahead of the range being out of bounds,
+            // so the two cases give callers the same answer.
+            for operation in [
+                { try tail.readData(offset: 0, length: 2) },
+                { try tail.read(offset: 0, as: UInt16.self) },
+                { try tail.write(UInt16(0xEEEE), at: 0) },
+                { try tail.unsafeRegion(at: 0) },
+            ] as [() throws -> Any] {
+                XCTAssertThrowsError(try operation()) { error in
+                    XCTAssertEqual(error as? FileIOError, .staleSlice)
+                }
+            }
 
-            // Flushing would write the slice's old bytes over whatever now
-            // sits at its offsets -- here, past the end of the file.
+            // The slice's range now falls outside the mapping, so flushing it
+            // would touch memory the parent no longer has.
             tail.sync()
             XCTAssertEqual(try Data(contentsOf: url), Data([0xA0, 0xA1]))
         }
