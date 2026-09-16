@@ -105,6 +105,11 @@ extension StreamedFile: ResizableFileIOProtocol {
         }
         guard length > 0 else { return }
 
+        // Bumped before the tail moves rather than leaving it to `resize`
+        // below: the shifting write can fail having already moved part of the
+        // tail, and slices taken beforehand are wrong either way.
+        generation &+= 1
+
         let tailData = try readData(offset: offset + length, length: Int(size) - (offset + length))
         try writeData(tailData, at: offset)
 
