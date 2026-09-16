@@ -297,9 +297,29 @@ public class MemoryMappedFileSlice<Parent: MemoryMappedFileIOProtocol & _SingleM
 }
 
 extension MemoryMappedFileSlice {
+    /// - Warning: Not revalidated against the parent. A slice keeps the
+    ///   `baseOffset` it was made with, so if the parent has been resized
+    ///   since, this addresses memory the parent no longer maps. Use
+    ///   ``unsafeRegion(at:)``, which checks and reports how far the run
+    ///   extends.
     @inlinable @inline(__always)
     public var ptr: UnsafeMutableRawPointer {
         parent.ptr.advanced(by: baseOffset)
+    }
+
+    /// The run is bounded by the parent's current size as well as by the end
+    /// of this slice, so a slice left outside a shrunk parent throws here
+    /// rather than handing back a pointer into nothing.
+    @inlinable @inline(__always)
+    public func unsafeRegion(at offset: Int) throws -> UnsafeContiguousRegion {
+        guard _fastPath(_isInBounds(offset, length: 1, in: size)) else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        let region = try parent.unsafeRegion(at: baseOffset + offset)
+        return .init(
+            pointer: region.pointer,
+            count: min(region.count, size - offset)
+        )
     }
 
     @inlinable @inline(__always)
@@ -323,9 +343,13 @@ extension MemoryMappedFileSlice {
         try parent.writeData(data, at: baseOffset + offset)
     }
 
+    /// Flushes only the part of this slice the parent still maps, so a slice
+    /// left outside a shrunk parent flushes nothing instead of touching
+    /// released memory.
     @inlinable @inline(__always)
     public func sync() {
-        _memorySync(parent.ptr.advanced(by: baseOffset), length: size)
+        guard let region = try? unsafeRegion(at: 0) else { return }
+        _memorySync(region.pointer, length: region.count)
     }
 }
 
@@ -341,27 +365,26 @@ extension MemoryMappedFileSlice {
         try read(offset: offset, as: T.self)
     }
 
+    /// Goes through the parent rather than ``ptr``, so the parent's current
+    /// size is checked as well as this slice's.
     @inlinable @inline(__always)
     public func read<T>(offset: Int, as: T.Type) throws -> T {
-        let length = MemoryLayout<T>.size
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
+        guard _fastPath(
+            _isInBounds(offset, length: MemoryLayout<T>.size, in: size)
+        ) else {
             throw FileIOError.offsetOutOfBounds
         }
-        return ptr.advanced(by: offset)
-            .assumingMemoryBound(to: T.self)
-            .pointee
+        return try parent.read(offset: baseOffset + offset, as: T.self)
     }
 
     @inlinable @inline(__always)
     public func write<T>(_ value: T, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        let length = MemoryLayout<T>.size
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
+        guard _fastPath(
+            _isInBounds(offset, length: MemoryLayout<T>.size, in: size)
+        ) else {
             throw FileIOError.offsetOutOfBounds
         }
-        ptr.advanced(by: offset)
-            .assumingMemoryBound(to: T.self)
-            .pointee = value
-        _memorySync(ptr.advanced(by: offset), length: length)
+        try parent.write(value, at: baseOffset + offset)
     }
 }

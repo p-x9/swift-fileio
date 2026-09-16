@@ -416,3 +416,27 @@ extension MemoryMappedFileTests {
     }
 }
 
+extension MemoryMappedFileTests {
+    /// A slice keeps the `baseOffset` and `size` it was made with, so
+    /// shrinking the parent leaves it addressing bytes the parent no longer
+    /// has. Every path with a way to report that should.
+    func testSliceOutsideAShrunkParentIsRejected() throws {
+        let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
+        try withTemporaryFile(size: initial.count, contents: initial) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            let tail = try file.fileSlice(offset: 4, length: 2)
+            XCTAssertEqual(try tail.readAllData(), Data([0xC0, 0xC1]))
+
+            try file.resize(newSize: 2)
+
+            XCTAssertThrowsError(try tail.readData(offset: 0, length: 2), "readData")
+            XCTAssertThrowsError(try tail.read(offset: 0, as: UInt16.self), "read<T>")
+            XCTAssertThrowsError(try tail.write(UInt16(0), at: 0), "write<T>")
+            XCTAssertThrowsError(try tail.unsafeRegion(at: 0), "unsafeRegion")
+
+            // Must not flush memory the parent no longer maps.
+            tail.sync()
+            XCTAssertEqual(try Data(contentsOf: url), Data([0xA0, 0xA1]))
+        }
+    }
+}
