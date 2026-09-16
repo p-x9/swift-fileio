@@ -181,6 +181,25 @@ extension StreamedFileTests {
         }
     }
 
+    /// `insertData` with nothing to insert, and `delete` asked to remove
+    /// nothing, both reach `resize` with the current length. Nothing moves,
+    /// so nothing taken from the file is stale.
+    func testNoOpMutationsKeepSlicesValid() throws {
+        let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
+        try withTemporaryFile(size: initial.count, contents: initial) { url in
+            let file = try StreamedFile.open(url: url, isWritable: true)
+            let tail = try file.fileSlice(offset: 4, length: 2)
+
+            try file.insertData(Data(), at: 0)
+            try file.delete(offset: 0, length: 0)
+            try file.resize(newSize: file.size)
+
+            XCTAssertTrue(tail.isValid)
+            XCTAssertEqual(try tail.readAllData(), Data([0xC0, 0xC1]))
+            XCTAssertEqual(try Data(contentsOf: url), initial)
+        }
+    }
+
     /// `.direct` slices were already safe, by delegating; they are
     /// invalidated on the same terms so that the mode does not change when a
     /// caller is told to take the slice again.

@@ -472,3 +472,24 @@ extension MemoryMappedFileTests {
     }
 }
 
+
+extension MemoryMappedFileTests {
+    /// `delete` asked to remove nothing, and an explicit same-size resize,
+    /// both reach `resize` with the current length. Nothing moves, so nothing
+    /// taken from the file is stale.
+    func testNoOpMutationsKeepSlicesValid() throws {
+        let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
+        try withTemporaryFile(size: initial.count, contents: initial) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            let tail = try file.fileSlice(offset: 4, length: 2)
+
+            try file.insertData(Data(), at: 0)
+            try file.delete(offset: 0, length: 0)
+            try file.resize(newSize: file.size)
+
+            XCTAssertTrue(tail.isValid)
+            XCTAssertEqual(try tail.readAllData(), Data([0xC0, 0xC1]))
+            XCTAssertEqual(try Data(contentsOf: url), initial)
+        }
+    }
+}

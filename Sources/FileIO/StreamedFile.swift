@@ -75,6 +75,10 @@ extension StreamedFile: ResizableFileIOProtocol {
     public func resize(newSize: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(newSize >= 0) else { return }
+        // `insertData` and `delete` both reach here with the current size when
+        // asked to move nothing. Bumping there would invalidate every slice
+        // over a no-op.
+        guard newSize != size else { return }
         generation &+= 1
         fileHandle.truncateFile(atOffset: UInt64(newSize))
     }

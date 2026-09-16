@@ -157,6 +157,11 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(newSize >= 0) else { return }
 
+        // Nothing moves when the length does not change, and `delete` reaches
+        // here with the current size whenever it is asked to remove nothing.
+        // Bumping there would invalidate every slice over a no-op.
+        guard newSize != size else { return }
+
         // Bumped before anything moves, so a slice made earlier is stale even
         // if the resize then fails partway.
         generation &+= 1
