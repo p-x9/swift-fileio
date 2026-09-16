@@ -179,6 +179,14 @@ extension StreamedFile {
     }
 }
 
+/// A view into part of a ``StreamedFile``.
+///
+/// Deliberately not `ResizableFileIOProtocol`. A slice that could insert or
+/// delete would resize its parent, shifting every byte after the edit --
+/// while sibling slices keep the `baseOffset` they were created with, so they
+/// silently address the wrong data, and a `.buffered` slice would write its
+/// stale snapshot back over whatever now occupies its old range. Resize the parent
+/// directly instead, and take fresh slices afterwards.
 public class StreamedFileSlice<Parent: StreamedFileIOProtocol>: FileIOSiliceProtocol, _StreamedFileIOProtocol {
     /// Mode of operation for `StreamedFileSlice`.
     public enum Mode {
@@ -275,36 +283,6 @@ extension StreamedFileSlice {
         )
         guard let buffer else { return }
         self.buffer = buffer
-    }
-}
-
-extension StreamedFileSlice: ResizableFileIOProtocol where Parent: ResizableFileIOProtocol {
-    public func insertData(_ data: Data, at offset: Int) throws {
-        guard isWritable else { throw FileIOError.notWritable }
-        guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
-            throw FileIOError.offsetOutOfBounds
-        }
-
-        try parent.insertData(data, at: baseOffset + offset)
-        self.size += data.count
-
-        if mode == .buffered {
-            buffer?.insert(contentsOf: data, at: offset)
-        }
-    }
-
-    public func delete(offset: Int, length: Int) throws {
-        guard isWritable else { throw FileIOError.notWritable }
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
-            throw FileIOError.offsetOutOfBounds
-        }
-
-        try parent.delete(offset: baseOffset + offset, length: length)
-        self.size -= length
-
-        if mode == .buffered {
-            buffer?.removeSubrange(offset ..< offset + length)
-        }
     }
 }
 

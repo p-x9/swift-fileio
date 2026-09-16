@@ -146,17 +146,27 @@ extension StreamedFileTests {
         }
     }
 
-    func testSliceInsert() throws {
-        let initial = Data([1, 2, 3, 4])
-
+    /// The buffered slice holds a snapshot, so after the parent is resized it
+    /// reports its original bytes while addressing a range that has moved.
+    /// `sync()` would then write that snapshot over the wrong bytes, which is
+    /// why a slice cannot resize its parent.
+    func testBufferedSliceIsStaleAfterTheParentIsResized() throws {
+        let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
         try withTemporaryFile(size: initial.count, contents: initial) { url in
             let file = try StreamedFile.open(url: url, isWritable: true)
-            let slice = try file.fileSlice(offset: 1, length: 2)
+            let tail = try file.fileSlice(offset: 4, length: 2)
+            XCTAssertEqual(try tail.readAllData(), Data([0xC0, 0xC1]))
 
-            try slice.insertData(Data([9]), at: 1)
+            try file.insertData(Data([0xFF]), at: 0)
 
-            let result = try Data(contentsOf: url)
-            XCTAssertEqual(result, Data([1, 2, 9, 3, 4]))
+            XCTAssertEqual(
+                try Data(contentsOf: url),
+                Data([0xFF, 0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
+            )
+            XCTAssertEqual(
+                try file.fileSlice(offset: 5, length: 2).readAllData(),
+                Data([0xC0, 0xC1])
+            )
         }
     }
 }
