@@ -163,6 +163,9 @@ extension StreamedFileTests {
                 try Data(contentsOf: url),
                 Data([0xFF, 0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
             )
+            // Still the snapshot taken at init, though offsets 4..<6 now hold
+            // [0xB1, 0xC0]. Reading right is what makes this dangerous.
+            XCTAssertEqual(try tail.readAllData(), Data([0xC0, 0xC1]))
             XCTAssertEqual(
                 try file.fileSlice(offset: 5, length: 2).readAllData(),
                 Data([0xC0, 0xC1])
