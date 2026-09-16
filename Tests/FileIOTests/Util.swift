@@ -8,6 +8,30 @@
 
 import Foundation
 
+#if os(Windows)
+import WinSDK
+#elseif canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#elseif canImport(WASILibc)
+import WASILibc
+#elseif canImport(Android)
+import Android
+#endif
+
+var systemPageSize: Int {
+#if os(Windows)
+    var info = SYSTEM_INFO()
+    GetSystemInfo(&info)
+    return Int(info.dwPageSize)
+#else
+    return Int(getpagesize())
+#endif
+}
+
 func withTemporaryFile(
     size: Int,
     contents: Data? = nil,

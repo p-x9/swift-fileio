@@ -9,7 +9,9 @@
 import XCTest
 @testable import FileIO
 
-#if canImport(Darwin)
+#if os(Windows)
+import ucrt
+#elseif canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
 import Glibc
@@ -309,6 +311,97 @@ extension MemoryMappedFileTests {
                 }
             }
         }
+    }
+}
+
+extension MemoryMappedFileTests {
+    /// The Windows branch uses `_wsopen_s` rather than the narrow form
+    /// specifically so the active code page cannot mangle the path. Nothing
+    /// exercised that while every fixture name was an ASCII UUID.
+    func testOpenPathWithNonASCIIName() throws {
+        let dir = FileManager.default.temporaryDirectory
+        let url = dir.appendingPathComponent("ファイル-日本語-\(UUID().uuidString)")
+        let contents = Data([0x11, 0x22, 0x33, 0x44])
+        guard FileManager.default.createFile(atPath: url.path, contents: contents) else {
+            throw XCTSkip("could not create \(url.lastPathComponent)")
+        }
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let file = try MemoryMappedFile.open(url: url, isWritable: false)
+        XCTAssertEqual(file.size, contents.count)
+        XCTAssertEqual(try file.readAllData(), contents)
+    }
+
+    /// Deleting everything resizes to zero, which cannot be mapped on any
+    /// platform. The instance has to stay usable rather than keep a pointer
+    /// to the view it just released.
+    func testDeleteEntireContents() throws {
+        let initial = Data([1, 2, 3, 4])
+        try withTemporaryFile(size: initial.count, contents: initial) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            try file.delete(offset: 0, length: initial.count)
+
+            XCTAssertEqual(file.size, 0)
+            XCTAssertEqual(try file.readAllData(), Data())
+            XCTAssertEqual(try Data(contentsOf: url), Data())
+            XCTAssertThrowsError(try file.read(offset: 0, as: UInt8.self)) { error in
+                XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+            }
+        }
+    }
+
+    /// An empty file starts with the placeholder pointer; growing it must
+    /// take on a real mapping, and shrinking back must return to a valid
+    /// empty state.
+    func testResizeFromAndToEmpty() throws {
+        try withTemporaryFile(size: 0) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            XCTAssertEqual(file.size, 0)
+
+            try file.resize(newSize: 4)
+            XCTAssertEqual(file.size, 4)
+            try file.writeData(Data([9, 8, 7, 6]), at: 0)
+            file.sync()
+            XCTAssertEqual(try Data(contentsOf: url), Data([9, 8, 7, 6]))
+
+            try file.resize(newSize: 0)
+            XCTAssertEqual(file.size, 0)
+            XCTAssertEqual(try Data(contentsOf: url), Data())
+        }
+    }
+}
+
+extension MemoryMappedFileTests {
+    /// `lseek` is `long` on Windows, 32-bit even in 64-bit builds, so a file
+    /// of 2 GiB or more reports a wrapped or negative size. The dyld shared
+    /// cache this library is used to read is well past that.
+    ///
+    /// Uses a sparse file and reads the size only -- nothing is mapped, so
+    /// this costs no memory and no disk beyond the metadata.
+    func testFileSizeBeyondInt32() throws {
+        let size = Int64(Int32.max) + 4096
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
+            throw XCTSkip("could not create fixture")
+        }
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let handle = try FileHandle(forWritingTo: url)
+        handle.truncateFile(atOffset: UInt64(size))
+        handle.closeFile()
+
+        let reported = try FileManager.default
+            .attributesOfItem(atPath: url.path)[.size] as? NSNumber
+        try XCTSkipUnless(
+            reported?.int64Value == size,
+            "filesystem would not make a \(size) byte sparse file"
+        )
+
+        let fd = try _openFileDescriptor(at: url, isWritable: false)
+        defer { close(fd) }
+        XCTAssertEqual(_fileSize(fd), size)
     }
 }
 

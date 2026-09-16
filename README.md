@@ -9,6 +9,19 @@ A Swift library for reading and writing files.
 [![Github stars](https://img.shields.io/github/stars/p-x9/swift-fileio)](https://github.com/p-x9/swift-fileio/stargazers)
 [![Github top language](https://img.shields.io/github/languages/top/p-x9/swift-fileio)](https://github.com/p-x9/swift-fileio/)
 
+## Supported Platforms
+
+| Platform | `MemoryMappedFile` | `StreamedFile` | `Concatenated*` |
+|---|---|---|---|
+| Apple platforms | ✅ | ✅ | ✅ |
+| Linux (glibc) | ✅ | ✅ | ✅ |
+| Linux (musl / Static Linux SDK) | ✅ | ✅ | ✅ |
+| Android | ✅ | ✅ | ✅ |
+| Windows | ✅ | ✅ | ✅ |
+
+All of these are built and tested in CI, except Android and the Static Linux
+SDK, which are cross-compiled and so build-only.
+
 ## Features
 
 - [MemoryMappedFile](./Sources/FileIO/MemoryMappedFile.swift): using mmap

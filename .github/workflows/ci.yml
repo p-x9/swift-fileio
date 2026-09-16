@@ -130,12 +130,6 @@ jobs:
   windows-build:
     name: Windows
     runs-on: windows-2025
-    # Visibility only. MemoryMappedFile and ConcatenatedMemoryMappedFile do
-    # not compile: Windows has no mmap/munmap/msync/ftruncate and none of the
-    # MAP_*/PROT_*/MS_SYNC constants. The FileHandle-based StreamedFile types
-    # and FileIO.swift do build clean, so this job tracks that the Windows gap
-    # stays confined to the two mapping types.
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -155,3 +149,12 @@ jobs:
 
       - name: Build
         run: swift build -v
+
+      # Separate from `swift test`, which reports a test-build failure on
+      # Windows as a bare "error: fatalError" with the real diagnostic
+      # swallowed.
+      - name: Build tests
+        run: swift build --build-tests -v
+
+      - name: Test
+        run: swift test -v

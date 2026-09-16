@@ -8,9 +8,8 @@
 
 import Foundation
 
-// Needed for mmap and friends. Foundation re-exports libc on Darwin and
-// Glibc, but not on Android or Windows, so relying on that leaves every
-// unqualified libc name here unresolved on those platforms.
+// Foundation re-exports libc on Darwin and Glibc but not on Android, so the
+// unqualified libc names below need this.
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -55,7 +54,7 @@ extension MemoryMappedFile {
     public static func open(url: URL, isWritable: Bool) throws -> MemoryMappedFile {
         let fd = try _openFileDescriptor(at: url, isWritable: isWritable)
 
-        let fileSize = lseek(fd, 0, SEEK_END)
+        let fileSize = _fileSize(fd)
         guard _fastPath(fileSize >= 0) else {
             close(fd)
             throw _currentSystemError()
@@ -64,25 +63,36 @@ extension MemoryMappedFile {
         guard _fastPath(fileSize > 0) else {
             return .init(
                 fileDescriptor: fd,
-                ptr: .allocate(byteCount: 0, alignment: 1),
+                ptr: emptyPlaceholder(),
                 size: 0,
                 isWritable: isWritable
             )
         }
 
-        var prot: Int32 = PROT_READ
-        if isWritable { prot |= PROT_WRITE }
-        guard let ptr = _memoryMap(
-            nil, Int(fileSize), prot, MAP_SHARED, fd, 0
-        ) else {
+        // A file can be longer than the address space can describe -- 32-bit
+        // targets such as wasm32 cap out well below what a 64-bit filesystem
+        // reports.
+        guard let length = Int(exactly: fileSize) else {
             close(fd)
-            throw _currentSystemError()
+            throw FileIOError.system(code: EOVERFLOW)
+        }
+
+        let ptr: UnsafeMutableRawPointer
+        do {
+            ptr = try _memoryMap(
+                fileDescriptor: fd,
+                length: length,
+                isWritable: isWritable
+            )
+        } catch {
+            close(fd)
+            throw error
         }
 
         return .init(
             fileDescriptor: fd,
             ptr: ptr,
-            size: Int(fileSize),
+            size: length,
             isWritable: isWritable
         )
     }
@@ -107,40 +117,67 @@ extension MemoryMappedFile {
         guard count > 0 else { return }
         data.withUnsafeBytes { buffer in
             memcpy(ptr.advanced(by: offset), buffer.baseAddress!, count)
-            msync(ptr.advanced(by: offset), count, MS_SYNC)
+            _memorySync(ptr.advanced(by: offset), length: count)
         }
     }
 
     @inlinable @inline(__always)
     public func sync() {
-        msync(ptr, size, MS_SYNC)
+        _memorySync(ptr, length: size)
     }
 
+    /// `size == 0` means `ptr` is the placeholder from
+    /// ``emptyPlaceholder()``, not a mapping -- zero-length regions cannot be
+    /// mapped on any platform. Unmapping it would not release it.
     internal func unmap() {
-        munmap(ptr, size)
+        if size > 0 {
+            _memoryUnmap(ptr, length: size)
+        } else {
+            ptr.deallocate()
+        }
+    }
+
+    /// Stand-in pointer for a file with nothing to map.
+    internal static func emptyPlaceholder() -> UnsafeMutableRawPointer {
+        .allocate(byteCount: 0, alignment: 1)
     }
 }
 
 extension MemoryMappedFile: ResizableFileIOProtocol {
+    /// Changes the length of the file and remaps it.
+    ///
+    /// - Note: On failure the instance reports a size of zero and must not be
+    ///   used again -- reopen the file instead. Whether the length on disk
+    ///   changed is not knowable from here: `ftruncate` can be interrupted
+    ///   mid-execution and growing writes zeros, so the previous mapping is
+    ///   not restored. Mapping the old length over a file that is no longer
+    ///   that long would read past the end, which faults rather than throws.
     public func resize(newSize: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(newSize >= 0) else { return }
 
-        guard ftruncate(fileDescriptor, off_t(newSize)) == 0 else {
-            throw _currentSystemError()
-        }
-
+        // Unmap before resizing: Windows refuses to shrink a file that still
+        // has a view open on it, with EACCES. POSIX does not mind the order.
         unmap()
 
-        var prot: Int32 = PROT_READ
-        if isWritable { prot |= PROT_WRITE }
-        guard let ptr = _memoryMap(
-            nil, newSize, prot, MAP_SHARED, fileDescriptor, 0
-        ) else {
+        // Nothing is mapped from here on, so record that before anything can
+        // throw. Otherwise a failure below would leave `ptr` addressing the
+        // released view, and deinit would unmap it a second time.
+        self.ptr = Self.emptyPlaceholder()
+        self.size = 0
+
+        guard _resizeFile(fileDescriptor, to: newSize) else {
             throw _currentSystemError()
         }
+        guard newSize > 0 else { return }
 
-        self.ptr = ptr
+        let mapped = try _memoryMap(
+            fileDescriptor: fileDescriptor,
+            length: newSize,
+            isWritable: isWritable
+        )
+        self.ptr.deallocate()
+        self.ptr = mapped
         self.size = newSize
     }
 
@@ -161,7 +198,7 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
 
         data.withUnsafeBytes { buffer in
             memcpy(ptr.advanced(by: offset), buffer.baseAddress!, count)
-            msync(ptr.advanced(by: offset), count + tailSize, MS_SYNC)
+            _memorySync(ptr.advanced(by: offset), length: count + tailSize)
         }
     }
 
@@ -214,7 +251,7 @@ extension MemoryMappedFile {
         ptr.advanced(by: offset)
             .assumingMemoryBound(to: T.self)
             .pointee = value
-        msync(ptr.advanced(by: offset), length, MS_SYNC)
+        _memorySync(ptr.advanced(by: offset), length: length)
     }
 }
 
@@ -287,7 +324,7 @@ extension MemoryMappedFileSlice {
 
     @inlinable @inline(__always)
     public func sync() {
-        msync(parent.ptr.advanced(by: baseOffset), size, MS_SYNC)
+        _memorySync(parent.ptr.advanced(by: baseOffset), length: size)
     }
 }
 
@@ -346,6 +383,6 @@ extension MemoryMappedFileSlice {
         ptr.advanced(by: offset)
             .assumingMemoryBound(to: T.self)
             .pointee = value
-        msync(ptr.advanced(by: offset), length, MS_SYNC)
+        _memorySync(ptr.advanced(by: offset), length: length)
     }
 }
