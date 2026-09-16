@@ -181,9 +181,9 @@ extension StreamedFileTests {
         }
     }
 
-    /// `insertData` with nothing to insert, and `delete` asked to remove
-    /// nothing, both reach `resize` with the current length. Nothing moves,
-    /// so nothing taken from the file is stale.
+    /// None of these move a byte, so none of them invalidate anything. Two
+    /// guards keep that true: the mutations return before they start, and
+    /// `resize` returns before bumping when the length is unchanged.
     func testNoOpMutationsKeepSlicesValid() throws {
         let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
         try withTemporaryFile(size: initial.count, contents: initial) { url in

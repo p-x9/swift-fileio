@@ -482,9 +482,9 @@ extension MemoryMappedFileTests {
 
 
 extension MemoryMappedFileTests {
-    /// `delete` asked to remove nothing, and an explicit same-size resize,
-    /// both reach `resize` with the current length. Nothing moves, so nothing
-    /// taken from the file is stale.
+    /// None of these move a byte, so none of them invalidate anything. Two
+    /// guards keep that true: the mutations return before they start, and
+    /// `resize` returns before bumping when the length is unchanged.
     func testNoOpMutationsKeepSlicesValid() throws {
         let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
         try withTemporaryFile(size: initial.count, contents: initial) { url in
@@ -498,6 +498,47 @@ extension MemoryMappedFileTests {
             XCTAssertTrue(tail.isValid)
             XCTAssertEqual(try tail.readAllData(), Data([0xC0, 0xC1]))
             XCTAssertEqual(try Data(contentsOf: url), initial)
+        }
+    }
+}
+
+extension MemoryMappedFileTests {
+    /// `isValid` is reachable through the slice protocol, not only through
+    /// the concrete types, so generic code can ask.
+    func testValidityIsVisibleThroughTheSliceProtocol() throws {
+        let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
+        try withTemporaryFile(size: initial.count, contents: initial) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            let slice: any FileIOSiliceProtocol = try file.fileSlice(
+                offset: 4,
+                length: 2
+            )
+            XCTAssertTrue(slice.isValid)
+
+            try file.insertData(Data([0xFF]), at: 0)
+
+            XCTAssertFalse(slice.isValid)
+        }
+    }
+
+    /// A slice of a file that cannot be resized takes the protocol's default
+    /// and is always valid.
+    func testConcatenatedSliceIsAlwaysValid() throws {
+        try withTemporaryFiles(
+            files: [
+                (size: 4, contents: Data([1, 2, 3, 4])),
+                (size: 4, contents: Data([5, 6, 7, 8])),
+            ]
+        ) { urls in
+            let file = try ConcatenatedMemoryMappedFile.open(
+                urls: urls,
+                isWritable: false
+            )
+            let slice: any FileIOSiliceProtocol = try file.fileSlice(
+                offset: 2,
+                length: 4
+            )
+            XCTAssertTrue(slice.isValid)
         }
     }
 }

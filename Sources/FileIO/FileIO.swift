@@ -71,6 +71,14 @@ public protocol _FileIOProtocol {
     /// Changes whenever an operation moves the bytes that offsets into this
     /// file address. A slice records it when it is made and refuses to work
     /// once it differs, because its offsets then describe other bytes.
+    ///
+    /// - Important: The default implementation returns a constant, which is
+    ///   only correct for a type that never moves its bytes. A type that also
+    ///   conforms to ``ResizableFileIOProtocol`` must implement this and
+    ///   change it before each mutation begins; leaving the default in place
+    ///   makes every slice it hands out claim to be current forever. Swift
+    ///   cannot withhold the default from those conformers, so this is a
+    ///   contract rather than something the compiler checks.
     var generation: Int { get }
 
     /// Reads a specified range of bytes from the file.
@@ -124,8 +132,26 @@ public protocol FileIOProtocol: _FileIOProtocol {
 
 public protocol FileIOSiliceProtocol: _FileIOProtocol {
     var baseOffset: Int { get }
+
+    /// Whether the file still holds the bytes this slice was made from.
+    ///
+    /// False once the file has been resized: ``baseOffset`` describes a
+    /// position, and the bytes have moved. The slice cannot be adjusted --
+    /// nothing records where they went -- so the remedy is to take a new one
+    /// from the file.
+    var isValid: Bool { get }
 }
 
+extension FileIOSiliceProtocol {
+    /// A slice of a file that cannot be resized never goes stale.
+    @inlinable
+    public var isValid: Bool { true }
+}
+
+/// - Important: A conformer must implement ``_FileIOProtocol/generation`` and
+///   change it before each of these operations starts moving bytes. Slices
+///   taken beforehand describe positions whose contents have moved, and that
+///   is the only signal they have.
 public protocol ResizableFileIOProtocol: _FileIOProtocol {
     /// Inserts data into the file at the specified offset, shifting existing data.
     ///
@@ -214,7 +240,8 @@ public protocol StreamedFileIOProtocol: _StreamedFileIOProtocol, FileIOProtocol 
 
 extension _FileIOProtocol {
     /// A file that cannot be resized never moves its bytes, so nothing taken
-    /// from it goes stale.
+    /// from it goes stale. See the requirement for what a resizable conformer
+    /// owes instead.
     @inlinable
     public var generation: Int { 0 }
 
