@@ -27,6 +27,7 @@ public final class MemoryMappedFile: MemoryMappedFileIOProtocol, _SingleMemoryMa
     public var fileDescriptor: Int32
     public private(set) var ptr: UnsafeMutableRawPointer
     public private(set) var size: Int
+    public private(set) var generation: Int = 0
 
     public let isWritable: Bool
 
@@ -156,6 +157,10 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(newSize >= 0) else { return }
 
+        // Bumped before anything moves, so a slice made earlier is stale even
+        // if the resize then fails partway.
+        generation &+= 1
+
         // Unmap before resizing: Windows refuses to shrink a file that still
         // has a view open on it, with EACCES. POSIX does not mind the order.
         unmap()
@@ -275,13 +280,22 @@ extension MemoryMappedFile {
 }
 
 /// A view into part of a ``MemoryMappedFile``.
-public class MemoryMappedFileSlice<Parent: MemoryMappedFileIOProtocol & _SingleMemoryMappedFileIOProtocol>: FileIOSiliceProtocol, _SingleMemoryMappedFileIOProtocol {
+public final class MemoryMappedFileSlice<Parent: MemoryMappedFileIOProtocol & _SingleMemoryMappedFileIOProtocol>: FileIOSiliceProtocol, _SingleMemoryMappedFileIOProtocol {
     public let parent: Parent
 
     public private(set) var baseOffset: Int
     public private(set) var size: Int
 
     public let isWritable: Bool
+
+    /// The parent's generation when this slice was made.
+    @usableFromInline
+    internal let parentGeneration: Int
+
+    /// The file's generation, not the default zero: a slice is only ever as
+    /// current as the file it came from.
+    @inlinable
+    public var generation: Int { parent.generation }
 
     init(
         parent: Parent,
@@ -293,10 +307,41 @@ public class MemoryMappedFileSlice<Parent: MemoryMappedFileIOProtocol & _SingleM
         self.baseOffset = baseOffset
         self.size = size
         self.isWritable = isWritable
+        self.parentGeneration = parent.generation
+    }
+
+    /// Whether the parent still holds the bytes this slice was made from.
+    ///
+    /// Checked by every method that can throw. Once this is false the only
+    /// remedy is to take a new slice from the parent: the offsets cannot be
+    /// adjusted, because nothing records where the bytes went.
+    @inlinable @inline(__always)
+    public var isValid: Bool {
+        parent.generation == parentGeneration
     }
 }
 
 extension MemoryMappedFileSlice {
+    /// Bounded by the end of this slice as well as by the parent's run, and
+    /// refused outright once the slice is stale.
+    @inlinable @inline(__always)
+    public func unsafeRegion(at offset: Int) throws -> UnsafeContiguousRegion {
+        guard _fastPath(isValid) else { throw FileIOError.staleSlice }
+        guard _fastPath(_isInBounds(offset, length: 1, in: size)) else {
+            throw FileIOError.offsetOutOfBounds
+        }
+        let region = try parent.unsafeRegion(at: baseOffset + offset)
+        return .init(
+            pointer: region.pointer,
+            count: min(region.count, size - offset)
+        )
+    }
+
+    /// - Warning: The only member here that does not check ``isValid``,
+    ///   because it returns a pointer and so has no way to report that it
+    ///   cannot. On a stale slice it addresses whatever the parent now holds
+    ///   at this offset, which may be outside the mapping entirely. Use
+    ///   ``unsafeRegion(at:)`` for the checked form.
     @inlinable @inline(__always)
     public var ptr: UnsafeMutableRawPointer {
         parent.ptr.advanced(by: baseOffset)
@@ -304,6 +349,7 @@ extension MemoryMappedFileSlice {
 
     @inlinable @inline(__always)
     public func readData(offset: Int, length: Int) throws -> Data {
+        guard _fastPath(isValid) else { throw FileIOError.staleSlice }
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
@@ -316,6 +362,7 @@ extension MemoryMappedFileSlice {
     @inlinable @inline(__always)
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
+        guard _fastPath(isValid) else { throw FileIOError.staleSlice }
         let count = data.count
         guard _fastPath(_isInBounds(offset, length: count, in: size)) else {
             throw FileIOError.offsetOutOfBounds
@@ -323,8 +370,12 @@ extension MemoryMappedFileSlice {
         try parent.writeData(data, at: baseOffset + offset)
     }
 
+    /// A stale slice flushes nothing: the bytes it was made from are no
+    /// longer at these offsets, so writing them back would overwrite whatever
+    /// took their place. `sync()` cannot throw, so this is silent.
     @inlinable @inline(__always)
     public func sync() {
+        guard _fastPath(isValid) else { return }
         _memorySync(parent.ptr.advanced(by: baseOffset), length: size)
     }
 }
@@ -343,6 +394,7 @@ extension MemoryMappedFileSlice {
 
     @inlinable @inline(__always)
     public func read<T>(offset: Int, as: T.Type) throws -> T {
+        guard _fastPath(isValid) else { throw FileIOError.staleSlice }
         let length = MemoryLayout<T>.size
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
@@ -355,6 +407,7 @@ extension MemoryMappedFileSlice {
     @inlinable @inline(__always)
     public func write<T>(_ value: T, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
+        guard _fastPath(isValid) else { throw FileIOError.staleSlice }
         let length = MemoryLayout<T>.size
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds

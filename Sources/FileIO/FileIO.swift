@@ -7,6 +7,16 @@ public enum FileIOError: Error, Equatable {
     case offsetOutOfBounds
     case notWritable
 
+    /// The slice was made before its file was resized, so the offsets it
+    /// holds no longer address the bytes it was made from. Take the slice
+    /// again from the resized file.
+    ///
+    /// Distinct from ``offsetOutOfBounds`` because the range can still be
+    /// perfectly valid: inserting ahead of a slice leaves it in bounds and
+    /// pointing at somebody else's bytes, which is the case that reads as a
+    /// plausible answer rather than as an error.
+    case staleSlice
+
     /// A platform call failed. `code` is an `errno` value, on every platform
     /// -- including Windows, whose CRT entry points report that way.
     ///
@@ -34,6 +44,7 @@ extension FileIOError: CustomStringConvertible {
         switch self {
         case .offsetOutOfBounds: "offset out of bounds"
         case .notWritable: "file is not writable"
+        case .staleSlice: "slice was made before the file was resized"
         case .system(let code): "system error \(code)"
         case .windows(let code): "Win32 error \(code)"
         }
@@ -56,6 +67,11 @@ internal func _isInBounds(_ offset: Int, length: Int, in size: Int) -> Bool {
 
 public protocol _FileIOProtocol {
     var size: Int { get }
+
+    /// Changes whenever an operation moves the bytes that offsets into this
+    /// file address. A slice records it when it is made and refuses to work
+    /// once it differs, because its offsets then describe other bytes.
+    var generation: Int { get }
 
     /// Reads a specified range of bytes from the file.
     ///
@@ -197,6 +213,11 @@ public protocol _StreamedFileIOProtocol: _FileIOProtocol {}
 public protocol StreamedFileIOProtocol: _StreamedFileIOProtocol, FileIOProtocol {}
 
 extension _FileIOProtocol {
+    /// A file that cannot be resized never moves its bytes, so nothing taken
+    /// from it goes stale.
+    @inlinable
+    public var generation: Int { 0 }
+
     /// Reads up to a specified number of bytes from the file, starting at a given offset.
     ///
     /// - Parameters:

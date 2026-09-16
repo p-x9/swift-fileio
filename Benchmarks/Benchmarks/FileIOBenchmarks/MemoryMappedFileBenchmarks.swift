@@ -55,6 +55,26 @@ func registerMemoryMappedFileBenchmarks() {
         }
     }
 
+    Benchmark("MemoryMappedFile.fileSlice.read.UInt64") { benchmark in
+        let dir = BenchmarkFixtures.makeTempDirectory()
+        defer { BenchmarkFixtures.cleanup(dir) }
+        let url = dir.appendingPathComponent("file.bin")
+        BenchmarkFixtures.makeFile(at: url, size: BenchmarkFixtures.defaultFileSize)
+        let file = try MemoryMappedFile.open(url: url, isWritable: false)
+        let slice = try file.fileSlice(offset: 0, length: file.size)
+        let offsets = BenchmarkFixtures.typedOffsets(
+            size: slice.size,
+            as: UInt64.self,
+            count: 100_000
+        )
+
+        benchmark.startMeasurement()
+
+        for offset in offsets {
+            blackHole(try slice.read(offset: offset, as: UInt64.self))
+        }
+    }
+
     Benchmark("MemoryMappedFile.readAllData") { benchmark in
         let dir = BenchmarkFixtures.makeTempDirectory()
         defer { BenchmarkFixtures.cleanup(dir) }

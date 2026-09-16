@@ -146,30 +146,57 @@ extension StreamedFileTests {
         }
     }
 
-    /// The buffered slice holds a snapshot, so after the parent is resized it
-    /// reports its original bytes while addressing a range that has moved.
-    /// `sync()` would then write that snapshot over the wrong bytes, which is
-    /// why a slice cannot resize its parent.
-    func testBufferedSliceIsStaleAfterTheParentIsResized() throws {
+    /// A buffered slice holds a snapshot, so before this it read back
+    /// correctly after a resize while addressing bytes that had moved -- and
+    /// `sync()` then wrote the snapshot over whatever took their place.
+    /// Invalidation closes both halves of that.
+    func testBufferedSliceIsInvalidatedByAnInsertBeforeIt() throws {
         let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
+        let inserted = Data([0xFF, 0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
         try withTemporaryFile(size: initial.count, contents: initial) { url in
             let file = try StreamedFile.open(url: url, isWritable: true)
             let tail = try file.fileSlice(offset: 4, length: 2)
             XCTAssertEqual(try tail.readAllData(), Data([0xC0, 0xC1]))
 
             try file.insertData(Data([0xFF]), at: 0)
+            XCTAssertEqual(try Data(contentsOf: url), inserted)
 
-            XCTAssertEqual(
-                try Data(contentsOf: url),
-                Data([0xFF, 0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
-            )
-            // Still the snapshot taken at init, though offsets 4..<6 now hold
-            // [0xB1, 0xC0]. Reading right is what makes this dangerous.
-            XCTAssertEqual(try tail.readAllData(), Data([0xC0, 0xC1]))
+            XCTAssertFalse(tail.isValid)
+            XCTAssertThrowsError(try tail.readAllData()) { error in
+                XCTAssertEqual(error as? FileIOError, .staleSlice)
+            }
+            XCTAssertThrowsError(try tail.writeData(Data([0x11]), at: 0)) { error in
+                XCTAssertEqual(error as? FileIOError, .staleSlice)
+            }
+
+            // The snapshot is not written back at the old offset.
+            tail.sync()
+            tail.refresh()
+            XCTAssertEqual(try Data(contentsOf: url), inserted)
+
             XCTAssertEqual(
                 try file.fileSlice(offset: 5, length: 2).readAllData(),
                 Data([0xC0, 0xC1])
             )
+        }
+    }
+
+    /// `.direct` slices were already safe, by delegating; they are
+    /// invalidated on the same terms so that the mode does not change when a
+    /// caller is told to take the slice again.
+    func testDirectSliceIsInvalidatedByAnInsertBeforeIt() throws {
+        let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
+        try withTemporaryFile(size: initial.count, contents: initial) { url in
+            let file = try StreamedFile.open(url: url, isWritable: true)
+            let tail = try file.fileSlice(offset: 4, length: 2, mode: .direct)
+            XCTAssertEqual(try tail.readAllData(), Data([0xC0, 0xC1]))
+
+            try file.insertData(Data([0xFF]), at: 0)
+
+            XCTAssertFalse(tail.isValid)
+            XCTAssertThrowsError(try tail.readAllData()) { error in
+                XCTAssertEqual(error as? FileIOError, .staleSlice)
+            }
         }
     }
 }
