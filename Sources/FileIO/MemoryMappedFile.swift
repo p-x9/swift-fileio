@@ -275,12 +275,6 @@ extension MemoryMappedFile {
 }
 
 /// A view into part of a ``MemoryMappedFile``.
-///
-/// Deliberately not `ResizableFileIOProtocol`. A slice that could insert or
-/// delete would resize its parent, shifting every byte after the edit --
-/// while sibling slices keep the `baseOffset` they were created with, so they
-/// silently address the wrong data. Resize the parent
-/// directly instead, and take fresh slices afterwards.
 public class MemoryMappedFileSlice<Parent: MemoryMappedFileIOProtocol & _SingleMemoryMappedFileIOProtocol>: FileIOSiliceProtocol, _SingleMemoryMappedFileIOProtocol {
     public let parent: Parent
 

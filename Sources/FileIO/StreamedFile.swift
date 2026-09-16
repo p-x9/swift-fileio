@@ -180,13 +180,6 @@ extension StreamedFile {
 }
 
 /// A view into part of a ``StreamedFile``.
-///
-/// Deliberately not `ResizableFileIOProtocol`. A slice that could insert or
-/// delete would resize its parent, shifting every byte after the edit --
-/// while sibling slices keep the `baseOffset` they were created with, so they
-/// silently address the wrong data, and a `.buffered` slice would write its
-/// stale snapshot back over whatever now occupies its old range. Resize the parent
-/// directly instead, and take fresh slices afterwards.
 public class StreamedFileSlice<Parent: StreamedFileIOProtocol>: FileIOSiliceProtocol, _StreamedFileIOProtocol {
     /// Mode of operation for `StreamedFileSlice`.
     public enum Mode {
