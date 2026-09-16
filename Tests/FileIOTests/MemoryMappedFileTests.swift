@@ -245,17 +245,28 @@ extension MemoryMappedFileTests {
         }
     }
 
-    func testSliceInsert() throws {
-        let initial = Data([1, 2, 3, 4])
-
+    /// Resizing the parent shifts everything after the edit, and slices keep
+    /// the `baseOffset` they were made with. Taking fresh slices is the only
+    /// way to stay correct -- which is why a slice cannot resize at all.
+    func testSlicesAreStaleAfterTheParentIsResized() throws {
+        let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
         try withTemporaryFile(size: initial.count, contents: initial) { url in
             let file = try MemoryMappedFile.open(url: url, isWritable: true)
-            let slice = try file.fileSlice(offset: 1, length: 2)
+            let tail = try file.fileSlice(offset: 4, length: 2)
+            XCTAssertEqual(try tail.readAllData(), Data([0xC0, 0xC1]))
 
-            try slice.insertData(Data([9]), at: 1)
+            try file.insertData(Data([0xFF]), at: 0)
 
-            let result = try Data(contentsOf: url)
-            XCTAssertEqual(result, Data([1, 2, 9, 3, 4]))
+            // The same two bytes have moved to offset 5.
+            XCTAssertEqual(
+                try file.readData(offset: 5, length: 2),
+                Data([0xC0, 0xC1])
+            )
+            XCTAssertEqual(try tail.readAllData(), Data([0xB1, 0xC0]))
+            XCTAssertEqual(
+                try file.fileSlice(offset: 5, length: 2).readAllData(),
+                Data([0xC0, 0xC1])
+            )
         }
     }
 }

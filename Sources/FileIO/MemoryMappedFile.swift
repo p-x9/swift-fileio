@@ -274,6 +274,7 @@ extension MemoryMappedFile {
     }
 }
 
+/// A view into part of a ``MemoryMappedFile``.
 public class MemoryMappedFileSlice<Parent: MemoryMappedFileIOProtocol & _SingleMemoryMappedFileIOProtocol>: FileIOSiliceProtocol, _SingleMemoryMappedFileIOProtocol {
     public let parent: Parent
 
@@ -325,28 +326,6 @@ extension MemoryMappedFileSlice {
     @inlinable @inline(__always)
     public func sync() {
         _memorySync(parent.ptr.advanced(by: baseOffset), length: size)
-    }
-}
-
-extension MemoryMappedFileSlice: ResizableFileIOProtocol where Parent: ResizableFileIOProtocol {
-    public func insertData(_ data: Data, at offset: Int) throws {
-        guard isWritable else { throw FileIOError.notWritable }
-        guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
-            throw FileIOError.offsetOutOfBounds
-        }
-
-        try parent.insertData(data, at: baseOffset + offset)
-        self.size += data.count
-    }
-
-    public func delete(offset: Int, length: Int) throws {
-        guard isWritable else { throw FileIOError.notWritable }
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
-            throw FileIOError.offsetOutOfBounds
-        }
-
-        try parent.delete(offset: baseOffset + offset, length: length)
-        self.size -= length
     }
 }
 
