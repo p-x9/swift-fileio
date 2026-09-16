@@ -7,9 +7,13 @@ public enum FileIOError: Error, Equatable {
     case offsetOutOfBounds
     case notWritable
 
-    /// The slice was made before its file was resized, so the offsets it
-    /// holds no longer address the bytes it was made from. Take the slice
+    /// The slice was made before its file changed length. Take the slice
     /// again from the resized file.
+    ///
+    /// Thrown for every slice made before the change, not only those whose
+    /// bytes actually moved -- appending past the end of a slice invalidates
+    /// it too. Narrowing that would mean recording which ranges each mutation
+    /// shifted, and nothing does.
     ///
     /// Distinct from ``offsetOutOfBounds`` because the range can still be
     /// perfectly valid: inserting ahead of a slice leaves it in bounds and
@@ -133,12 +137,16 @@ public protocol FileIOProtocol: _FileIOProtocol {
 public protocol FileIOSiliceProtocol: _FileIOProtocol {
     var baseOffset: Int { get }
 
-    /// Whether the file still holds the bytes this slice was made from.
+    /// Whether this slice was made since the file last changed length.
     ///
-    /// False once the file has been resized: ``baseOffset`` describes a
-    /// position, and the bytes have moved. The slice cannot be adjusted --
-    /// nothing records where they went -- so the remedy is to take a new one
-    /// from the file.
+    /// ``baseOffset`` describes a position, so a mutation that moves bytes
+    /// leaves it addressing someone else's. Rather than work out which
+    /// slices that applies to, any change of length invalidates all of them
+    /// -- including a slice whose own bytes did not move. A resize to the
+    /// length the file already has changes nothing and invalidates nothing.
+    ///
+    /// The slice cannot be adjusted, because nothing records where the bytes
+    /// went; take a new one from the file instead.
     var isValid: Bool { get }
 }
 

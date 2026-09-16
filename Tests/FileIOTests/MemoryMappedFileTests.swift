@@ -542,3 +542,25 @@ extension MemoryMappedFileTests {
         }
     }
 }
+
+extension MemoryMappedFileTests {
+    /// Invalidation is conservative: a slice goes stale on any change of
+    /// length, including one that appends past its end and leaves its own
+    /// bytes exactly where they were.
+    func testGrowingPastASliceStillInvalidatesIt() throws {
+        let initial = Data([0xA0, 0xA1, 0xB0, 0xB1])
+        try withTemporaryFile(size: initial.count, contents: initial) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            let head = try file.fileSlice(offset: 0, length: 2)
+
+            try file.insertData(Data([0xFF]), at: file.size)
+
+            // Its two bytes never moved.
+            XCTAssertEqual(try file.readData(offset: 0, length: 2), Data([0xA0, 0xA1]))
+            XCTAssertFalse(head.isValid)
+            XCTAssertThrowsError(try head.readAllData()) { error in
+                XCTAssertEqual(error as? FileIOError, .staleSlice)
+            }
+        }
+    }
+}

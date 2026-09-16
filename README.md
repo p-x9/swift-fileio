@@ -73,7 +73,8 @@ graph TD
 - `FileIOProtocol` extends it with file-opening and slicing capabilities.
 - `FileIOSiliceProtocol` represents a logical view into a file with a `baseOffset`.
 - `ResizableFileIOProtocol` adds structural mutation operations such as insert and delete. Only whole-file types adopt it; slices do not.
-- Resizing a file invalidates every slice taken from it beforehand. Their offsets describe positions, and the bytes have moved, so they throw `FileIOError.staleSlice` rather than answer from the wrong place — `isValid` reports this, and taking the slice again from the resized file is the remedy.
+- Changing a file's length invalidates every slice taken from it beforehand — all of them, not only the ones whose bytes moved, since nothing records which ranges a mutation shifted. `isValid` reports this, and the remedy is to take the slice again.
+- A stale slice throws `FileIOError.staleSlice` from everything that can throw. `sync()` and `refresh()` have no failure channel and do nothing at all, and `MemoryMappedFileSlice.ptr` is unchecked and can still hand back a pointer outside the mapping — use `unsafeRegion(at:)` for the checked form.
 - `_MemoryMappedFileIOProtocol` and `_StreamedFileIOProtocol` describe low-level implementation traits.
 - `_MemoryMappedFileIOProtocol` requires `unsafeRegion(at:)`, which returns a pointer *and* how far the memory stays contiguous from it. Both mapping strategies can satisfy this, so generic code written against it works with either.
 - `_SingleMemoryMappedFileIOProtocol` adds `ptr`, a base pointer for the whole file. `MemoryMappedFile` has one; `ConcatenatedMemoryMappedFile` maps each of its files separately and genuinely does not, so it adopts only the former.
