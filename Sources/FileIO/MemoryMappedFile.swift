@@ -218,6 +218,7 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
+        guard length > 0 else { return }
 
         let tailOffset = offset + length
         let tailSize = size - tailOffset

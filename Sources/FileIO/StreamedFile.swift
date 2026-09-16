@@ -88,6 +88,7 @@ extension StreamedFile: ResizableFileIOProtocol {
         guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
+        guard data.count > 0 else { return }
 
         let remainingData = try readData(offset: offset, length: Int(size) - offset)
         try resize(newSize: size + numericCast(data.count))
@@ -102,6 +103,7 @@ extension StreamedFile: ResizableFileIOProtocol {
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
+        guard length > 0 else { return }
 
         let tailData = try readData(offset: offset + length, length: Int(size) - (offset + length))
         try writeData(tailData, at: offset)
