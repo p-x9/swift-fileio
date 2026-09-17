@@ -341,3 +341,52 @@ extension ConcatenatedMemoryMappedFileTests {
         }
     }
 }
+
+extension ConcatenatedMemoryMappedFileTests {
+    /// The typed paths no longer check the whole file before looking up the
+    /// segment, so these pin that the lookup rejects the same offsets the
+    /// removed check did.
+    func testTypedAccessRejectsOffsetsOutsideEverySegment() throws {
+        try withTemporaryFiles(
+            files: [
+                (size: 4, contents: Data([1, 2, 3, 4])),
+                (size: 4, contents: Data([5, 6, 7, 8])),
+            ]
+        ) { urls in
+            let file = try ConcatenatedMemoryMappedFile.open(
+                urls: urls,
+                isWritable: true
+            )
+            XCTAssertEqual(file.size, 8)
+
+            for offset in [-1, 8, 9, Int.min, Int.max] {
+                XCTAssertThrowsError(
+                    try file.read(offset: offset, as: UInt8.self)
+                ) { error in
+                    XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+                }
+                XCTAssertThrowsError(
+                    try file.write(UInt8(0xEE), at: offset)
+                ) { error in
+                    XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+                }
+            }
+
+            // In range, but the value runs off the end of the last segment,
+            // so it takes the straddling path and is rejected there.
+            XCTAssertThrowsError(
+                try file.read(offset: 7, as: UInt32.self)
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+            }
+            XCTAssertThrowsError(
+                try file.write(UInt32(0), at: 7)
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+            }
+
+            // A value straddling the seam still works.
+            XCTAssertEqual(try file.read(offset: 3, as: UInt16.self), 0x0504)
+        }
+    }
+}

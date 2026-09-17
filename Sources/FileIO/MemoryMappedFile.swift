@@ -138,6 +138,33 @@ extension MemoryMappedFile {
         }
     }
 
+    /// Loads a `T` at `offset` without checking that it fits.
+    ///
+    /// For a caller that has already established the range some other way --
+    /// `ConcatenatedMemoryMappedFile` proves it against the segment it just
+    /// looked up. Checking again is the single largest cost in a read there.
+    ///
+    /// - Precondition: `offset + MemoryLayout<T>.size <= size`.
+    @inlinable @inline(__always)
+    internal func _uncheckedRead<T>(at offset: Int, as: T.Type) -> T {
+        ptr.advanced(by: offset)
+            .assumingMemoryBound(to: T.self)
+            .pointee
+    }
+
+    /// Stores `value` at `offset` without checking that it fits, and flushes
+    /// it. The counterpart to ``_uncheckedRead(at:as:)``.
+    ///
+    /// - Precondition: `offset + MemoryLayout<T>.size <= size`, and the file
+    ///   is writable.
+    @inlinable @inline(__always)
+    internal func _uncheckedWrite<T>(_ value: T, at offset: Int) {
+        ptr.advanced(by: offset)
+            .assumingMemoryBound(to: T.self)
+            .pointee = value
+        _memorySync(ptr.advanced(by: offset), length: MemoryLayout<T>.size)
+    }
+
     /// Stand-in pointer for a file with nothing to map.
     internal static func emptyPlaceholder() -> UnsafeMutableRawPointer {
         .allocate(byteCount: 0, alignment: 1)

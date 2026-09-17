@@ -202,14 +202,14 @@ extension ConcatenatedMemoryMappedFile {
     @inlinable @inline(__always)
     public func read<T>(offset: Int, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
-            throw FileIOError.offsetOutOfBounds
-        }
 
+        // No whole-file check first: `_file(for:)` already rejects an offset
+        // that no segment holds, and the segment check below is the stricter
+        // of the two. The read used to be checked three times over.
         let segment = try _file(for: offset)
         let localOffset = offset - segment.offset
         if _fastPath(length <= segment.size - localOffset) {
-            return try segment._file.read(offset: localOffset, as: T.self)
+            return segment._file._uncheckedRead(at: localOffset, as: T.self)
         }
 
         // Straddles a seam, so the bytes are not contiguous in memory and
@@ -223,14 +223,13 @@ extension ConcatenatedMemoryMappedFile {
     public func write<T>(_ value: T, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let length = MemoryLayout<T>.size
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
-            throw FileIOError.offsetOutOfBounds
-        }
 
+        // As in `read(offset:as:)`: the lookup rejects an offset no segment
+        // holds, and the segment check below is the stricter one.
         let segment = try _file(for: offset)
         let localOffset = offset - segment.offset
         if _fastPath(length <= segment.size - localOffset) {
-            try segment._file.write(value, at: localOffset)
+            segment._file._uncheckedWrite(value, at: localOffset)
             return
         }
 
