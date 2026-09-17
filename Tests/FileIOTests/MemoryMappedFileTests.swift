@@ -561,6 +561,20 @@ extension MemoryMappedFileTests {
             XCTAssertThrowsError(try head.readAllData()) { error in
                 XCTAssertEqual(error as? FileIOError, .staleSlice)
             }
+
+            // Including the shared helpers, and including an offset that is
+            // out of the slice's own range -- staleness is the reason that
+            // matters, so it is the one reported.
+            XCTAssertThrowsError(
+                try head.readData(offset: 0, upToCount: 2)
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .staleSlice)
+            }
+            XCTAssertThrowsError(
+                try head.readData(offset: 999, upToCount: 2)
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .staleSlice)
+            }
         }
     }
 }

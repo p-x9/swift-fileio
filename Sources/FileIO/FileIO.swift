@@ -85,6 +85,26 @@ public protocol _FileIOProtocol {
     ///   contract rather than something the compiler checks.
     var generation: Int { get }
 
+    /// Whether this still describes the bytes it was made from.
+    ///
+    /// Always true for a whole file, which is its own reference. A slice
+    /// holds a ``FileIOSiliceProtocol/baseOffset``, which describes a
+    /// position, so a mutation that moves bytes leaves it addressing someone
+    /// else's. Rather than work out which slices that applies to, any change
+    /// of length invalidates all of them -- including a slice whose own bytes
+    /// did not move. A resize to the length the file already has changes
+    /// nothing and invalidates nothing.
+    ///
+    /// A slice cannot be adjusted, because nothing records where the bytes
+    /// went; take a new one from the file instead.
+    ///
+    /// Declared here rather than on ``FileIOSiliceProtocol`` so that the
+    /// shared implementations below can check it. They are extension methods
+    /// rather than requirements, so a version added further down the
+    /// hierarchy would be bypassed by anything holding an
+    /// ``_FileIOProtocol``.
+    var isValid: Bool { get }
+
     /// Reads a specified range of bytes from the file.
     ///
     /// - Parameters:
@@ -136,24 +156,6 @@ public protocol FileIOProtocol: _FileIOProtocol {
 
 public protocol FileIOSiliceProtocol: _FileIOProtocol {
     var baseOffset: Int { get }
-
-    /// Whether this slice was made since the file last changed length.
-    ///
-    /// ``baseOffset`` describes a position, so a mutation that moves bytes
-    /// leaves it addressing someone else's. Rather than work out which
-    /// slices that applies to, any change of length invalidates all of them
-    /// -- including a slice whose own bytes did not move. A resize to the
-    /// length the file already has changes nothing and invalidates nothing.
-    ///
-    /// The slice cannot be adjusted, because nothing records where the bytes
-    /// went; take a new one from the file instead.
-    var isValid: Bool { get }
-}
-
-extension FileIOSiliceProtocol {
-    /// A slice of a file that cannot be resized never goes stale.
-    @inlinable
-    public var isValid: Bool { true }
 }
 
 /// - Important: A conformer must implement ``_FileIOProtocol/generation`` and
@@ -253,6 +255,10 @@ extension _FileIOProtocol {
     @inlinable
     public var generation: Int { 0 }
 
+    /// Only a slice can fall behind the file it came from.
+    @inlinable
+    public var isValid: Bool { true }
+
     /// Reads up to a specified number of bytes from the file, starting at a given offset.
     ///
     /// - Parameters:
@@ -264,6 +270,12 @@ extension _FileIOProtocol {
         offset: Int,
         upToCount count: Int
     ) throws -> Data {
+        // Ahead of the bounds check, as everywhere else: a stale slice's own
+        // `size` is the one it was made with, so an offset can be out of
+        // range here for a reason that is not the interesting one. The check
+        // cannot be dropped in favour of the delegate's, because `size -
+        // offset` below would overflow for a sufficiently negative offset.
+        guard _fastPath(isValid) else { throw FileIOError.staleSlice }
         guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
