@@ -48,12 +48,42 @@ extension StreamedFile {
         return fileHandle.readData(ofLength: Int(length))
     }
 
+    /// Reads `length` bytes at `offset` without checking that they fit.
+    ///
+    /// `size` costs an `lseek` to the end of the file every time it is read,
+    /// so the check in ``readData(offset:length:)`` is a syscall as well as a
+    /// comparison. A caller that has already clamped the range against a
+    /// known size -- `ConcatenatedStreamedFile` does, from its stored segment
+    /// sizes -- should not pay it again.
+    ///
+    /// - Precondition: `offset + length <= size`.
+    @usableFromInline
+    internal func _uncheckedReadData(offset: Int, length: Int) -> Data {
+        fileHandle.seek(toFileOffset: UInt64(offset))
+        return fileHandle.readData(ofLength: length)
+    }
+
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let count = data.count
         guard _fastPath(_isInBounds(offset, length: count, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
+        fileHandle.seek(toFileOffset: UInt64(offset))
+        if #available(macOS 10.15.4, iOS 13.4, watchOS 6.2, tvOS 13.4, *) {
+            try fileHandle.write(contentsOf: data)
+        } else {
+            fileHandle.write(data)
+        }
+    }
+
+    /// Writes `data` at `offset` without checking that it fits, or that the
+    /// file is writable. The counterpart to ``_uncheckedReadData(offset:length:)``.
+    ///
+    /// - Precondition: `offset + data.count <= size`, and the file is
+    ///   writable.
+    @usableFromInline
+    internal func _uncheckedWriteData(_ data: Data, at offset: Int) throws {
         fileHandle.seek(toFileOffset: UInt64(offset))
         if #available(macOS 10.15.4, iOS 13.4, watchOS 6.2, tvOS 13.4, *) {
             try fileHandle.write(contentsOf: data)

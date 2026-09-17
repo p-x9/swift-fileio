@@ -138,3 +138,64 @@ extension ConcatenatedStreamedFileTests {
         }
     }
 }
+
+extension ConcatenatedStreamedFileTests {
+    /// The segment writes no longer check the range themselves, so this pins
+    /// that the whole-file check still rejects an overrun -- and rejects it
+    /// before anything is written, rather than partway through.
+    func testWriteOutOfBoundsLeavesEveryFileUntouched() throws {
+        let first = Data([1, 2, 3, 4])
+        let second = Data([5, 6, 7, 8])
+        try withTemporaryFiles(
+            files: [
+                (size: 4, contents: first),
+                (size: 4, contents: second),
+            ]
+        ) { urls in
+            let file = try ConcatenatedStreamedFile.open(
+                urls: urls,
+                isWritable: true
+            )
+            XCTAssertEqual(file.size, 8)
+
+            // Starts inside the first segment and runs past the end of the
+            // last, so a loop that only checked per segment would write the
+            // first chunk before failing.
+            XCTAssertThrowsError(
+                try file.writeData(Data(repeating: 0xEE, count: 6), at: 3)
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+            }
+
+            XCTAssertEqual(try Data(contentsOf: urls[0]), first)
+            XCTAssertEqual(try Data(contentsOf: urls[1]), second)
+
+            // The same write, one byte shorter, spans the seam and lands.
+            try file.writeData(Data(repeating: 0xEE, count: 5), at: 3)
+            XCTAssertEqual(try Data(contentsOf: urls[0]), Data([1, 2, 3, 0xEE]))
+            XCTAssertEqual(
+                try Data(contentsOf: urls[1]),
+                Data([0xEE, 0xEE, 0xEE, 0xEE])
+            )
+        }
+    }
+
+    /// A read-only file is still rejected at the top, before any segment is
+    /// touched.
+    func testWriteRejectedOnAReadOnlyConcatenation() throws {
+        try withTemporaryFiles(
+            files: [(size: 4, contents: Data([1, 2, 3, 4]))]
+        ) { urls in
+            let file = try ConcatenatedStreamedFile.open(
+                urls: urls,
+                isWritable: false
+            )
+            XCTAssertThrowsError(
+                try file.writeData(Data([0xEE]), at: 0)
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .notWritable)
+            }
+            XCTAssertEqual(try Data(contentsOf: urls[0]), Data([1, 2, 3, 4]))
+        }
+    }
+}

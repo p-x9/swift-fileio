@@ -84,7 +84,10 @@ extension ConcatenatedStreamedFile {
             let localOffset = currentOffset - file.offset
             let readable = min(remaining, file.size - localOffset)
 
-            let chunk = try file._file.readData(offset: localOffset, length: readable)
+            let chunk = file._file._uncheckedReadData(
+                offset: localOffset,
+                length: readable
+            )
             result.append(chunk)
 
             currentOffset += readable
@@ -111,7 +114,7 @@ extension ConcatenatedStreamedFile {
             let writable = min(remaining, file.size - localOffset)
 
             let slice = data.subdata(in: written ..< written + writable)
-            try file._file.writeData(slice, at: localOffset)
+            try file._file._uncheckedWriteData(slice, at: localOffset)
 
             written += writable
             currentOffset += writable

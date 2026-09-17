@@ -21,6 +21,30 @@ func registerConcatenatedStreamedFileBenchmarks() {
         }
     }
 
+    Benchmark("ConcatenatedStreamedFile.writeData") { benchmark in
+        let fixture = BenchmarkFixtures.makeConcatenatedFixture(
+            count: 4,
+            size: BenchmarkFixtures.defaultSegmentSize
+        )
+        defer { BenchmarkFixtures.cleanup(fixture.directory) }
+        let file = try ConcatenatedStreamedFile.open(
+            urls: fixture.urls,
+            isWritable: true
+        )
+        let ranges = BenchmarkFixtures.readRanges(
+            size: file.size,
+            length: 4 * 1024,
+            count: 1_000
+        )
+        let payload = Data(repeating: 0xAB, count: 4 * 1024)
+
+        benchmark.startMeasurement()
+
+        for range in ranges {
+            try file.writeData(payload.prefix(range.length), at: range.offset)
+        }
+    }
+
     Benchmark("ConcatenatedStreamedFile.readData") { benchmark in
         let fixture = BenchmarkFixtures.makeConcatenatedFixture(
             count: 4,
