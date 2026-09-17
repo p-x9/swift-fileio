@@ -7,6 +7,20 @@ public enum FileIOError: Error, Equatable {
     case offsetOutOfBounds
     case notWritable
 
+    /// The slice was made before its file changed length. Take the slice
+    /// again from the resized file.
+    ///
+    /// Thrown for every slice made before the change, not only those whose
+    /// bytes actually moved -- appending past the end of a slice invalidates
+    /// it too. Narrowing that would mean recording which ranges each mutation
+    /// shifted, and nothing does.
+    ///
+    /// Distinct from ``offsetOutOfBounds`` because the range can still be
+    /// perfectly valid: inserting ahead of a slice leaves it in bounds and
+    /// pointing at somebody else's bytes, which is the case that reads as a
+    /// plausible answer rather than as an error.
+    case staleSlice
+
     /// A platform call failed. `code` is an `errno` value, on every platform
     /// -- including Windows, whose CRT entry points report that way.
     ///
@@ -34,6 +48,7 @@ extension FileIOError: CustomStringConvertible {
         switch self {
         case .offsetOutOfBounds: "offset out of bounds"
         case .notWritable: "file is not writable"
+        case .staleSlice: "slice was made before the file was resized"
         case .system(let code): "system error \(code)"
         case .windows(let code): "Win32 error \(code)"
         }
@@ -56,6 +71,39 @@ internal func _isInBounds(_ offset: Int, length: Int, in size: Int) -> Bool {
 
 public protocol _FileIOProtocol {
     var size: Int { get }
+
+    /// Changes whenever an operation moves the bytes that offsets into this
+    /// file address. A slice records it when it is made and refuses to work
+    /// once it differs, because its offsets then describe other bytes.
+    ///
+    /// - Important: The default implementation returns a constant, which is
+    ///   only correct for a type that never moves its bytes. A type that also
+    ///   conforms to ``ResizableFileIOProtocol`` must implement this and
+    ///   change it before each mutation begins; leaving the default in place
+    ///   makes every slice it hands out claim to be current forever. Swift
+    ///   cannot withhold the default from those conformers, so this is a
+    ///   contract rather than something the compiler checks.
+    var generation: Int { get }
+
+    /// Whether this still describes the bytes it was made from.
+    ///
+    /// Always true for a whole file, which is its own reference. A slice
+    /// holds a ``FileIOSiliceProtocol/baseOffset``, which describes a
+    /// position, so a mutation that moves bytes leaves it addressing someone
+    /// else's. Rather than work out which slices that applies to, any change
+    /// of length invalidates all of them -- including a slice whose own bytes
+    /// did not move. A resize to the length the file already has changes
+    /// nothing and invalidates nothing.
+    ///
+    /// A slice cannot be adjusted, because nothing records where the bytes
+    /// went; take a new one from the file instead.
+    ///
+    /// Declared here rather than on ``FileIOSiliceProtocol`` so that the
+    /// shared implementations below can check it. They are extension methods
+    /// rather than requirements, so a version added further down the
+    /// hierarchy would be bypassed by anything holding an
+    /// ``_FileIOProtocol``.
+    var isValid: Bool { get }
 
     /// Reads a specified range of bytes from the file.
     ///
@@ -110,6 +158,10 @@ public protocol FileIOSiliceProtocol: _FileIOProtocol {
     var baseOffset: Int { get }
 }
 
+/// - Important: A conformer must implement ``_FileIOProtocol/generation`` and
+///   change it before each of these operations starts moving bytes. Slices
+///   taken beforehand describe positions whose contents have moved, and that
+///   is the only signal they have.
 public protocol ResizableFileIOProtocol: _FileIOProtocol {
     /// Inserts data into the file at the specified offset, shifting existing data.
     ///
@@ -197,6 +249,16 @@ public protocol _StreamedFileIOProtocol: _FileIOProtocol {}
 public protocol StreamedFileIOProtocol: _StreamedFileIOProtocol, FileIOProtocol {}
 
 extension _FileIOProtocol {
+    /// A file that cannot be resized never moves its bytes, so nothing taken
+    /// from it goes stale. See the requirement for what a resizable conformer
+    /// owes instead.
+    @inlinable
+    public var generation: Int { 0 }
+
+    /// Only a slice can fall behind the file it came from.
+    @inlinable
+    public var isValid: Bool { true }
+
     /// Reads up to a specified number of bytes from the file, starting at a given offset.
     ///
     /// - Parameters:
@@ -208,6 +270,12 @@ extension _FileIOProtocol {
         offset: Int,
         upToCount count: Int
     ) throws -> Data {
+        // Ahead of the bounds check, as everywhere else: a stale slice's own
+        // `size` is the one it was made with, so an offset can be out of
+        // range here for a reason that is not the interesting one. The check
+        // cannot be dropped in favour of the delegate's, because `size -
+        // offset` below would overflow for a sufficiently negative offset.
+        guard _fastPath(isValid) else { throw FileIOError.staleSlice }
         guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }

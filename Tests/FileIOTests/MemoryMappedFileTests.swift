@@ -245,28 +245,92 @@ extension MemoryMappedFileTests {
         }
     }
 
-    /// Resizing the parent shifts everything after the edit, and slices keep
-    /// the `baseOffset` they were made with. Taking fresh slices is the only
-    /// way to stay correct -- which is why a slice cannot resize at all.
-    func testSlicesAreStaleAfterTheParentIsResized() throws {
+    /// An insert ahead of a slice shifts its bytes away while leaving its
+    /// range perfectly in bounds, so there is nothing for a bounds check to
+    /// catch. The slice is invalidated instead, and a fresh one is correct.
+    func testSliceIsInvalidatedByAnInsertBeforeIt() throws {
         let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
         try withTemporaryFile(size: initial.count, contents: initial) { url in
             let file = try MemoryMappedFile.open(url: url, isWritable: true)
             let tail = try file.fileSlice(offset: 4, length: 2)
+            XCTAssertTrue(tail.isValid)
             XCTAssertEqual(try tail.readAllData(), Data([0xC0, 0xC1]))
 
             try file.insertData(Data([0xFF]), at: 0)
 
-            // The same two bytes have moved to offset 5.
+            // Offsets 4..<6 are still within the file -- they just hold
+            // somebody else's bytes now.
+            XCTAssertEqual(
+                try file.readData(offset: 4, length: 2),
+                Data([0xB1, 0xC0])
+            )
             XCTAssertEqual(
                 try file.readData(offset: 5, length: 2),
                 Data([0xC0, 0xC1])
             )
-            XCTAssertEqual(try tail.readAllData(), Data([0xB1, 0xC0]))
+
+            XCTAssertFalse(tail.isValid)
+            XCTAssertThrowsError(try tail.readAllData()) { error in
+                XCTAssertEqual(error as? FileIOError, .staleSlice)
+            }
+            XCTAssertThrowsError(try tail.read(offset: 0, as: UInt16.self)) { error in
+                XCTAssertEqual(error as? FileIOError, .staleSlice)
+            }
+            XCTAssertThrowsError(try tail.unsafeRegion(at: 0)) { error in
+                XCTAssertEqual(error as? FileIOError, .staleSlice)
+            }
+
             XCTAssertEqual(
                 try file.fileSlice(offset: 5, length: 2).readAllData(),
                 Data([0xC0, 0xC1])
             )
+        }
+    }
+
+    /// Shrinking leaves the slice outside the file altogether. Same answer,
+    /// so callers do not need to tell the two cases apart.
+    func testSliceIsInvalidatedByAShrink() throws {
+        let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
+        try withTemporaryFile(size: initial.count, contents: initial) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            let tail = try file.fileSlice(offset: 4, length: 2)
+
+            try file.resize(newSize: 2)
+
+            XCTAssertFalse(tail.isValid)
+            // Staleness is reported ahead of the range being out of bounds,
+            // so the two cases give callers the same answer.
+            for operation in [
+                { try tail.readData(offset: 0, length: 2) },
+                { try tail.read(offset: 0, as: UInt16.self) },
+                { try tail.write(UInt16(0xEEEE), at: 0) },
+                { try tail.unsafeRegion(at: 0) },
+            ] as [() throws -> Any] {
+                XCTAssertThrowsError(try operation()) { error in
+                    XCTAssertEqual(error as? FileIOError, .staleSlice)
+                }
+            }
+
+            // The slice's range now falls outside the mapping, so flushing it
+            // would touch memory the parent no longer has.
+            tail.sync()
+            XCTAssertEqual(try Data(contentsOf: url), Data([0xA0, 0xA1]))
+        }
+    }
+
+    /// A file that is never resized never invalidates anything, so the check
+    /// costs a comparison and nothing else.
+    func testSliceStaysValidWithoutAResize() throws {
+        let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
+        try withTemporaryFile(size: initial.count, contents: initial) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            let tail = try file.fileSlice(offset: 4, length: 2)
+
+            try file.writeData(Data([0xEE]), at: 0)
+            try tail.writeData(Data([0x11]), at: 0)
+
+            XCTAssertTrue(tail.isValid)
+            XCTAssertEqual(try tail.readAllData(), Data([0x11, 0xC1]))
         }
     }
 }
@@ -416,3 +480,101 @@ extension MemoryMappedFileTests {
     }
 }
 
+
+extension MemoryMappedFileTests {
+    /// None of these move a byte, so none of them invalidate anything. Two
+    /// guards keep that true: the mutations return before they start, and
+    /// `resize` returns before bumping when the length is unchanged.
+    func testNoOpMutationsKeepSlicesValid() throws {
+        let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
+        try withTemporaryFile(size: initial.count, contents: initial) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            let tail = try file.fileSlice(offset: 4, length: 2)
+
+            try file.insertData(Data(), at: 0)
+            try file.delete(offset: 0, length: 0)
+            try file.resize(newSize: file.size)
+
+            XCTAssertTrue(tail.isValid)
+            XCTAssertEqual(try tail.readAllData(), Data([0xC0, 0xC1]))
+            XCTAssertEqual(try Data(contentsOf: url), initial)
+        }
+    }
+}
+
+extension MemoryMappedFileTests {
+    /// `isValid` is reachable through the slice protocol, not only through
+    /// the concrete types, so generic code can ask.
+    func testValidityIsVisibleThroughTheSliceProtocol() throws {
+        let initial = Data([0xA0, 0xA1, 0xB0, 0xB1, 0xC0, 0xC1])
+        try withTemporaryFile(size: initial.count, contents: initial) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            let slice: any FileIOSiliceProtocol = try file.fileSlice(
+                offset: 4,
+                length: 2
+            )
+            XCTAssertTrue(slice.isValid)
+
+            try file.insertData(Data([0xFF]), at: 0)
+
+            XCTAssertFalse(slice.isValid)
+        }
+    }
+
+    /// A slice of a file that cannot be resized takes the protocol's default
+    /// and is always valid.
+    func testConcatenatedSliceIsAlwaysValid() throws {
+        try withTemporaryFiles(
+            files: [
+                (size: 4, contents: Data([1, 2, 3, 4])),
+                (size: 4, contents: Data([5, 6, 7, 8])),
+            ]
+        ) { urls in
+            let file = try ConcatenatedMemoryMappedFile.open(
+                urls: urls,
+                isWritable: false
+            )
+            let slice: any FileIOSiliceProtocol = try file.fileSlice(
+                offset: 2,
+                length: 4
+            )
+            XCTAssertTrue(slice.isValid)
+        }
+    }
+}
+
+extension MemoryMappedFileTests {
+    /// Invalidation is conservative: a slice goes stale on any change of
+    /// length, including one that appends past its end and leaves its own
+    /// bytes exactly where they were.
+    func testGrowingPastASliceStillInvalidatesIt() throws {
+        let initial = Data([0xA0, 0xA1, 0xB0, 0xB1])
+        try withTemporaryFile(size: initial.count, contents: initial) { url in
+            let file = try MemoryMappedFile.open(url: url, isWritable: true)
+            let head = try file.fileSlice(offset: 0, length: 2)
+
+            try file.insertData(Data([0xFF]), at: file.size)
+
+            // Its two bytes never moved.
+            XCTAssertEqual(try file.readData(offset: 0, length: 2), Data([0xA0, 0xA1]))
+            XCTAssertFalse(head.isValid)
+            XCTAssertThrowsError(try head.readAllData()) { error in
+                XCTAssertEqual(error as? FileIOError, .staleSlice)
+            }
+
+            // Including the shared helpers, and including an offset that is
+            // out of the slice's own range -- staleness is the reason that
+            // matters, so it is the one reported.
+            XCTAssertThrowsError(
+                try head.readData(offset: 0, upToCount: 2)
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .staleSlice)
+            }
+            XCTAssertThrowsError(
+                try head.readData(offset: 999, upToCount: 2)
+            ) { error in
+                XCTAssertEqual(error as? FileIOError, .staleSlice)
+            }
+        }
+    }
+}

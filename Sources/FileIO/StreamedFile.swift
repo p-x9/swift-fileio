@@ -14,6 +14,7 @@ public final class StreamedFile: StreamedFileIOProtocol {
     public var size: Int {
         return numericCast(fileHandle.seekToEndOfFile())
     }
+    public private(set) var generation: Int = 0
 
     public let isWritable: Bool
 
@@ -74,6 +75,11 @@ extension StreamedFile: ResizableFileIOProtocol {
     public func resize(newSize: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(newSize >= 0) else { return }
+        // `insertData` and `delete` both reach here with the current size when
+        // asked to move nothing. Bumping there would invalidate every slice
+        // over a no-op.
+        guard newSize != size else { return }
+        generation &+= 1
         fileHandle.truncateFile(atOffset: UInt64(newSize))
     }
 
@@ -82,6 +88,7 @@ extension StreamedFile: ResizableFileIOProtocol {
         guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
+        guard data.count > 0 else { return }
 
         let remainingData = try readData(offset: offset, length: Int(size) - offset)
         try resize(newSize: size + numericCast(data.count))
@@ -96,6 +103,12 @@ extension StreamedFile: ResizableFileIOProtocol {
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
+        guard length > 0 else { return }
+
+        // Bumped before the tail moves rather than leaving it to `resize`
+        // below: the shifting write can fail having already moved part of the
+        // tail, and slices taken beforehand are wrong either way.
+        generation &+= 1
 
         let tailData = try readData(offset: offset + length, length: Int(size) - (offset + length))
         try writeData(tailData, at: offset)
@@ -180,7 +193,7 @@ extension StreamedFile {
 }
 
 /// A view into part of a ``StreamedFile``.
-public class StreamedFileSlice<Parent: StreamedFileIOProtocol>: FileIOSiliceProtocol, _StreamedFileIOProtocol {
+public final class StreamedFileSlice<Parent: StreamedFileIOProtocol>: FileIOSiliceProtocol, _StreamedFileIOProtocol {
     /// Mode of operation for `StreamedFileSlice`.
     public enum Mode {
         /// Reads and writes are performed directly on the underlying file.
@@ -201,6 +214,25 @@ public class StreamedFileSlice<Parent: StreamedFileIOProtocol>: FileIOSiliceProt
     @_spi(Core)
     public private(set) var buffer: Data?
 
+    /// The parent's generation when this slice was made.
+    @usableFromInline
+    internal let parentGeneration: Int
+
+    /// The file's generation, not the default zero: a slice is only ever as
+    /// current as the file it came from.
+    @inlinable
+    public var generation: Int { parent.generation }
+
+    /// Whether the parent still holds the bytes this slice was made from.
+    ///
+    /// Once this is false the only remedy is to take a new slice: in
+    /// `.buffered` mode the slice is holding a copy of bytes that have since
+    /// moved, and there is nothing recording where they went.
+    @inlinable @inline(__always)
+    public var isValid: Bool {
+        parent.generation == parentGeneration
+    }
+
     init(
         parent: Parent,
         baseOffset: Int,
@@ -213,6 +245,7 @@ public class StreamedFileSlice<Parent: StreamedFileIOProtocol>: FileIOSiliceProt
         self.size = size
         self.isWritable = isWritable
         self.mode = mode
+        self.parentGeneration = parent.generation
 
         if mode == .buffered {
             self.buffer = try parent.readData(
@@ -225,6 +258,7 @@ public class StreamedFileSlice<Parent: StreamedFileIOProtocol>: FileIOSiliceProt
 
 extension StreamedFileSlice {
     public func readData(offset: Int, length: Int) throws -> Data {
+        guard _fastPath(isValid) else { throw FileIOError.staleSlice }
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
@@ -242,6 +276,7 @@ extension StreamedFileSlice {
 
     public func writeData(_ data: Data, at offset: Int) throws {
         guard isWritable else { throw FileIOError.notWritable }
+        guard _fastPath(isValid) else { throw FileIOError.staleSlice }
         let count = data.count
         guard _fastPath(_isInBounds(offset, length: count, in: size)) else {
             throw FileIOError.offsetOutOfBounds
@@ -254,7 +289,12 @@ extension StreamedFileSlice {
         }
     }
 
+    /// A stale slice flushes nothing. In `.buffered` mode that matters: the
+    /// buffer holds bytes that have since moved, so writing it back at the
+    /// old offset would overwrite whatever took their place. `sync()` cannot
+    /// throw, so this is silent.
     public func sync() {
+        guard _fastPath(isValid) else { return }
         switch mode {
         case .direct:
             parent.sync()
@@ -267,8 +307,11 @@ extension StreamedFileSlice {
     /// Refreshes the buffer by reloading data from the parent file.
     ///
     /// - Note: This method only applies when the slice is in `.buffered` mode.
+    /// - Note: Does nothing once the slice is stale. Rereading would load
+    ///   whatever now sits at the old offsets, which is not a refreshed view
+    ///   of the same bytes.
     public func refresh() {
-        guard mode == .buffered else { return }
+        guard mode == .buffered, _fastPath(isValid) else { return }
 
         let buffer = try? parent.readData(
             offset: baseOffset,
