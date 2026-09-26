@@ -11,8 +11,10 @@ import Foundation
 public final class StreamedFile: StreamedFileIOProtocol {
     @_spi(Core)
     public let fileHandle: FileHandle
+    /// Clamped rather than trapping if the file grows past `Int.max` after
+    /// opening, which a 32-bit target such as wasm32 can reach.
     public var size: Int {
-        return numericCast(fileHandle.seekToEndOfFile())
+        return Int(clamping: fileHandle.seekToEndOfFile())
     }
     public private(set) var generation: Int = 0
 
@@ -34,6 +36,12 @@ extension StreamedFile {
             try FileHandle(forUpdating: url)
         } else {
             try FileHandle(forReadingFrom: url)
+        }
+        // Offsets are `Int`, so on 32-bit targets such as wasm32 the tail of
+        // a longer file could not be addressed.
+        guard fileHandle.seekToEndOfFile() <= UInt64(Int.max) else {
+            fileHandle.closeFile()
+            throw _sizeOverflowError()
         }
         return .init(fileHandle: fileHandle, isWritable: isWritable)
     }
@@ -107,8 +115,9 @@ extension StreamedFile: ResizableFileIOProtocol {
         guard _fastPath(newSize >= 0) else { return }
         // `insertData` and `delete` both reach here with the current size when
         // asked to move nothing. Bumping there would invalidate every slice
-        // over a no-op.
-        guard newSize != size else { return }
+        // over a no-op. Compared unclamped, because `size` reads `Int.max`
+        // for any longer file.
+        guard UInt64(newSize) != fileHandle.seekToEndOfFile() else { return }
         generation &+= 1
         fileHandle.truncateFile(atOffset: UInt64(newSize))
     }
@@ -119,9 +128,11 @@ extension StreamedFile: ResizableFileIOProtocol {
             throw FileIOError.offsetOutOfBounds
         }
         guard data.count > 0 else { return }
+        let (newSize, overflow) = size.addingReportingOverflow(data.count)
+        guard !overflow else { throw _sizeOverflowError() }
 
-        let remainingData = try readData(offset: offset, length: Int(size) - offset)
-        try resize(newSize: size + numericCast(data.count))
+        let remainingData = try readData(offset: offset, length: size - offset)
+        try resize(newSize: newSize)
 
         try writeData(remainingData, at: offset + data.count)
 

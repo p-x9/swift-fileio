@@ -45,7 +45,10 @@ extension ConcatenatedStreamedFile {
         for url in urls {
             let file: StreamedFile = try .open(url: url, isWritable: isWritable)
             files.append(.init(offset: fullSize, size: file.size, _file: file))
-            fullSize += file.size
+            // Reachable on wasm32, where files can exceed `Int.max` together.
+            let (sum, overflow) = fullSize.addingReportingOverflow(file.size)
+            guard !overflow else { throw _sizeOverflowError() }
+            fullSize = sum
         }
         return .init(
             size: fullSize,
