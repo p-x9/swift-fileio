@@ -211,6 +211,16 @@ internal func _sizeOverflowError() -> FileIOError {
     .system(code: EOVERFLOW)
 }
 
+/// `length` as an in-memory byte count, throwing `EOVERFLOW` where it does
+/// not fit `Int` -- a 32-bit target meeting a range of 2 GiB or more.
+@usableFromInline
+internal func _dataLength(_ length: Int64) throws -> Int {
+    guard let length = Int(exactly: length) else {
+        throw _sizeOverflowError()
+    }
+    return length
+}
+
 #if os(Windows)
 /// `GetLastError` as an error, for the Win32 APIs that do not touch `errno`.
 internal func _lastWindowsError() -> FileIOError {

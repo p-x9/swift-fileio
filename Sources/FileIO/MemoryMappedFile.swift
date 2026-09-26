@@ -26,7 +26,7 @@ public final class MemoryMappedFile: MemoryMappedFileIOProtocol, _SingleMemoryMa
     @_spi(Core)
     public var fileDescriptor: Int32
     public private(set) var ptr: UnsafeMutableRawPointer
-    public private(set) var size: Int
+    public private(set) var size: Int64
     public private(set) var generation: Int = 0
 
     public let isWritable: Bool
@@ -34,7 +34,7 @@ public final class MemoryMappedFile: MemoryMappedFileIOProtocol, _SingleMemoryMa
     internal init(
         fileDescriptor: Int32,
         ptr: UnsafeMutableRawPointer,
-        size: Int,
+        size: Int64,
         isWritable: Bool
     ) {
         self.fileDescriptor = fileDescriptor
@@ -93,7 +93,7 @@ extension MemoryMappedFile {
         return .init(
             fileDescriptor: fd,
             ptr: ptr,
-            size: length,
+            size: fileSize,
             isWritable: isWritable
         )
     }
@@ -101,30 +101,43 @@ extension MemoryMappedFile {
 
 extension MemoryMappedFile {
     @inlinable @inline(__always)
-    public func readData(offset: Int, length: Int) throws -> Data {
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
+    public func readData(offset: Int64, length: Int) throws -> Data {
+        guard _fastPath(_isInBounds(offset, length: Int64(length), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
-        return Data(bytes: ptr.advanced(by: offset), count: length)
+        return Data(bytes: _pointer(at: offset), count: length)
     }
 
     @inlinable @inline(__always)
-    public func writeData(_ data: Data, at offset: Int) throws {
+    public func writeData(_ data: Data, at offset: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let count = data.count
-        guard _fastPath(_isInBounds(offset, length: count, in: size)) else {
+        guard _fastPath(_isInBounds(offset, length: Int64(count), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         guard count > 0 else { return }
         data.withUnsafeBytes { buffer in
-            memcpy(ptr.advanced(by: offset), buffer.baseAddress!, count)
-            _memorySync(ptr.advanced(by: offset), length: count)
+            memcpy(_pointer(at: offset), buffer.baseAddress!, count)
+            _memorySync(_pointer(at: offset), length: count)
         }
     }
 
     @inlinable @inline(__always)
     public func sync() {
-        _memorySync(ptr, length: size)
+        _memorySync(ptr, length: _mappedLength)
+    }
+
+    /// The mapping's length. Mapped memory lies within the address space, so
+    /// `size` always fits `Int`.
+    @inlinable @inline(__always)
+    internal var _mappedLength: Int {
+        Int(truncatingIfNeeded: size)
+    }
+
+    /// The address of `offset`, which must already be within the mapping.
+    @inlinable @inline(__always)
+    internal func _pointer(at offset: Int64) -> UnsafeMutableRawPointer {
+        ptr.advanced(by: Int(truncatingIfNeeded: offset))
     }
 
     /// `size == 0` means `ptr` is the placeholder from
@@ -132,7 +145,7 @@ extension MemoryMappedFile {
     /// mapped on any platform. Unmapping it would not release it.
     internal func unmap() {
         if size > 0 {
-            _memoryUnmap(ptr, length: size)
+            _memoryUnmap(ptr, length: _mappedLength)
         } else {
             ptr.deallocate()
         }
@@ -146,8 +159,8 @@ extension MemoryMappedFile {
     ///
     /// - Precondition: `offset + MemoryLayout<T>.size <= size`.
     @inlinable @inline(__always)
-    internal func _uncheckedRead<T>(at offset: Int, as: T.Type) -> T {
-        ptr.advanced(by: offset)
+    internal func _uncheckedRead<T>(at offset: Int64, as: T.Type) -> T {
+        _pointer(at: offset)
             .assumingMemoryBound(to: T.self)
             .pointee
     }
@@ -158,11 +171,11 @@ extension MemoryMappedFile {
     /// - Precondition: `offset + MemoryLayout<T>.size <= size`, and the file
     ///   is writable.
     @inlinable @inline(__always)
-    internal func _uncheckedWrite<T>(_ value: T, at offset: Int) {
-        ptr.advanced(by: offset)
+    internal func _uncheckedWrite<T>(_ value: T, at offset: Int64) {
+        _pointer(at: offset)
             .assumingMemoryBound(to: T.self)
             .pointee = value
-        _memorySync(ptr.advanced(by: offset), length: MemoryLayout<T>.size)
+        _memorySync(_pointer(at: offset), length: MemoryLayout<T>.size)
     }
 
     /// Stand-in pointer for a file with nothing to map.
@@ -180,9 +193,13 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
     ///   mid-execution and growing writes zeros, so the previous mapping is
     ///   not restored. Mapping the old length over a file that is no longer
     ///   that long would read past the end, which faults rather than throws.
-    public func resize(newSize: Int) throws {
+    ///
+    /// - Throws: `FileIOError.system` with `EOVERFLOW` if `newSize` cannot be
+    ///   mapped because it does not fit `Int`. The file is left untouched.
+    public func resize(newSize: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(newSize >= 0) else { return }
+        let length = try _dataLength(newSize)
 
         // Nothing moves when the length does not change, and `delete` reaches
         // here with the current size whenever it is asked to remove nothing.
@@ -203,14 +220,14 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         self.ptr = Self.emptyPlaceholder()
         self.size = 0
 
-        guard _resizeFile(fileDescriptor, to: newSize) else {
+        guard _resizeFile(fileDescriptor, to: length) else {
             throw _currentSystemError()
         }
-        guard newSize > 0 else { return }
+        guard length > 0 else { return }
 
         let mapped = try _memoryMap(
             fileDescriptor: fileDescriptor,
-            length: newSize,
+            length: length,
             isWritable: isWritable
         )
         self.ptr.deallocate()
@@ -219,7 +236,7 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
     }
 
     @inlinable @inline(__always)
-    public func insertData(_ data: Data, at offset: Int) throws {
+    public func insertData(_ data: Data, at offset: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
             throw FileIOError.offsetOutOfBounds
@@ -227,21 +244,21 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         let count = data.count
         guard count > 0 else { return }
 
-        let (newSize, overflow) = size.addingReportingOverflow(count)
+        let (newSize, overflow) = size.addingReportingOverflow(Int64(count))
         guard !overflow else { throw _sizeOverflowError() }
         try resize(newSize: newSize)
 
-        let tailSize = size - offset - count
-        memmove(ptr.advanced(by: offset + count), ptr.advanced(by: offset), tailSize)
+        let tailSize = Int(truncatingIfNeeded: size - offset) - count
+        memmove(_pointer(at: offset + Int64(count)), _pointer(at: offset), tailSize)
 
         data.withUnsafeBytes { buffer in
-            memcpy(ptr.advanced(by: offset), buffer.baseAddress!, count)
-            _memorySync(ptr.advanced(by: offset), length: count + tailSize)
+            memcpy(_pointer(at: offset), buffer.baseAddress!, count)
+            _memorySync(_pointer(at: offset), length: count + tailSize)
         }
     }
 
     @inlinable @inline(__always)
-    public func delete(offset: Int, length: Int) throws {
+    public func delete(offset: Int64, length: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
@@ -249,8 +266,8 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         guard length > 0 else { return }
 
         let tailOffset = offset + length
-        let tailSize = size - tailOffset
-        memmove(ptr.advanced(by: offset), ptr.advanced(by: tailOffset), tailSize)
+        let tailSize = Int(truncatingIfNeeded: size - tailOffset)
+        memmove(_pointer(at: offset), _pointer(at: tailOffset), tailSize)
 
         let newSize = size - length
         try resize(newSize: newSize) // sync
@@ -260,37 +277,37 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
 extension MemoryMappedFile {
     @_disfavoredOverload
     @inlinable @inline(__always)
-    public func read<T>(offset: Int) throws -> T {
+    public func read<T>(offset: Int64) throws -> T {
         try read(offset: offset, as: T.self)
     }
 
     @inlinable @inline(__always)
-    public func read<T>(offset: Int) throws -> Optional<T> {
+    public func read<T>(offset: Int64) throws -> Optional<T> {
         try read(offset: offset, as: T.self)
     }
 
     @inlinable @inline(__always)
-    public func read<T>(offset: Int, as: T.Type) throws -> T {
+    public func read<T>(offset: Int64, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
+        guard _fastPath(_isInBounds(offset, length: Int64(length), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
-        return ptr.advanced(by: offset)
+        return _pointer(at: offset)
             .assumingMemoryBound(to: T.self)
             .pointee
     }
 
     @inlinable @inline(__always)
-    public func write<T>(_ value: T, at offset: Int) throws {
+    public func write<T>(_ value: T, at offset: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let length = MemoryLayout<T>.size
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
+        guard _fastPath(_isInBounds(offset, length: Int64(length), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
-        ptr.advanced(by: offset)
+        _pointer(at: offset)
             .assumingMemoryBound(to: T.self)
             .pointee = value
-        _memorySync(ptr.advanced(by: offset), length: length)
+        _memorySync(_pointer(at: offset), length: length)
     }
 }
 
@@ -298,8 +315,8 @@ extension MemoryMappedFile {
     public typealias FileSlice = MemoryMappedFileSlice<MemoryMappedFile>
 
     public func fileSlice(
-        offset: Int,
-        length: Int
+        offset: Int64,
+        length: Int64
     ) throws -> FileSlice {
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
@@ -317,8 +334,8 @@ extension MemoryMappedFile {
 public final class MemoryMappedFileSlice<Parent: MemoryMappedFileIOProtocol & _SingleMemoryMappedFileIOProtocol>: FileIOSiliceProtocol, _SingleMemoryMappedFileIOProtocol {
     public let parent: Parent
 
-    public private(set) var baseOffset: Int
-    public private(set) var size: Int
+    public private(set) var baseOffset: Int64
+    public private(set) var size: Int64
 
     public let isWritable: Bool
 
@@ -333,8 +350,8 @@ public final class MemoryMappedFileSlice<Parent: MemoryMappedFileIOProtocol & _S
 
     init(
         parent: Parent,
-        baseOffset: Int,
-        size: Int,
+        baseOffset: Int64,
+        size: Int64,
         isWritable: Bool
     ) {
         self.parent = parent
@@ -359,7 +376,7 @@ extension MemoryMappedFileSlice {
     /// Bounded by the end of this slice as well as by the parent's run, and
     /// refused outright once the slice is stale.
     @inlinable @inline(__always)
-    public func unsafeRegion(at offset: Int) throws -> UnsafeContiguousRegion {
+    public func unsafeRegion(at offset: Int64) throws -> UnsafeContiguousRegion {
         guard _fastPath(isValid) else { throw FileIOError.staleSlice }
         guard _fastPath(_isInBounds(offset, length: 1, in: size)) else {
             throw FileIOError.offsetOutOfBounds
@@ -367,7 +384,7 @@ extension MemoryMappedFileSlice {
         let region = try parent.unsafeRegion(at: baseOffset + offset)
         return .init(
             pointer: region.pointer,
-            count: min(region.count, size - offset)
+            count: min(region.count, Int(truncatingIfNeeded: size - offset))
         )
     }
 
@@ -378,13 +395,19 @@ extension MemoryMappedFileSlice {
     ///   ``unsafeRegion(at:)`` for the checked form.
     @inlinable @inline(__always)
     public var ptr: UnsafeMutableRawPointer {
-        parent.ptr.advanced(by: baseOffset)
+        parent.ptr.advanced(by: Int(truncatingIfNeeded: baseOffset))
+    }
+
+    /// The address of `offset`, which must already be within the slice.
+    @inlinable @inline(__always)
+    internal func _pointer(at offset: Int64) -> UnsafeMutableRawPointer {
+        ptr.advanced(by: Int(truncatingIfNeeded: offset))
     }
 
     @inlinable @inline(__always)
-    public func readData(offset: Int, length: Int) throws -> Data {
+    public func readData(offset: Int64, length: Int) throws -> Data {
         guard _fastPath(isValid) else { throw FileIOError.staleSlice }
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
+        guard _fastPath(_isInBounds(offset, length: Int64(length), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         return try parent.readData(
@@ -394,11 +417,11 @@ extension MemoryMappedFileSlice {
     }
 
     @inlinable @inline(__always)
-    public func writeData(_ data: Data, at offset: Int) throws {
+    public func writeData(_ data: Data, at offset: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(isValid) else { throw FileIOError.staleSlice }
         let count = data.count
-        guard _fastPath(_isInBounds(offset, length: count, in: size)) else {
+        guard _fastPath(_isInBounds(offset, length: Int64(count), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         try parent.writeData(data, at: baseOffset + offset)
@@ -412,45 +435,45 @@ extension MemoryMappedFileSlice {
     @inlinable @inline(__always)
     public func sync() {
         guard _fastPath(isValid) else { return }
-        _memorySync(parent.ptr.advanced(by: baseOffset), length: size)
+        _memorySync(ptr, length: Int(truncatingIfNeeded: size))
     }
 }
 
 extension MemoryMappedFileSlice {
     @_disfavoredOverload
     @inlinable @inline(__always)
-    public func read<T>(offset: Int) throws -> T {
+    public func read<T>(offset: Int64) throws -> T {
         try read(offset: offset, as: T.self)
     }
 
     @inlinable @inline(__always)
-    public func read<T>(offset: Int) throws -> Optional<T> {
+    public func read<T>(offset: Int64) throws -> Optional<T> {
         try read(offset: offset, as: T.self)
     }
 
     @inlinable @inline(__always)
-    public func read<T>(offset: Int, as: T.Type) throws -> T {
+    public func read<T>(offset: Int64, as: T.Type) throws -> T {
         guard _fastPath(isValid) else { throw FileIOError.staleSlice }
         let length = MemoryLayout<T>.size
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
+        guard _fastPath(_isInBounds(offset, length: Int64(length), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
-        return ptr.advanced(by: offset)
+        return _pointer(at: offset)
             .assumingMemoryBound(to: T.self)
             .pointee
     }
 
     @inlinable @inline(__always)
-    public func write<T>(_ value: T, at offset: Int) throws {
+    public func write<T>(_ value: T, at offset: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(isValid) else { throw FileIOError.staleSlice }
         let length = MemoryLayout<T>.size
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
+        guard _fastPath(_isInBounds(offset, length: Int64(length), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
-        ptr.advanced(by: offset)
+        _pointer(at: offset)
             .assumingMemoryBound(to: T.self)
             .pointee = value
-        _memorySync(ptr.advanced(by: offset), length: length)
+        _memorySync(_pointer(at: offset), length: length)
     }
 }

@@ -76,30 +76,30 @@ enum BenchmarkFixtures {
 
     /// Returns a deterministic list of `(offset, length)` pairs that fit within `size`.
     static func readRanges(
-        size: Int,
+        size: Int64,
         length: Int,
         count: Int
-    ) -> [(offset: Int, length: Int)] {
-        guard size > length, count > 0 else { return [] }
-        let span = size - length
-        let stride = max(span / count, 1)
-        return (0..<count).map { i in
+    ) -> [(offset: Int64, length: Int)] {
+        guard size > Int64(length), count > 0 else { return [] }
+        let span = size - Int64(length)
+        let stride = max(span / Int64(count), 1)
+        return (0..<Int64(count)).map { i in
             (offset: (i * stride) % span, length: length)
         }
     }
 
     /// Returns a deterministic list of offsets aligned for `T`-sized reads within `size`.
     static func typedOffsets<T>(
-        size: Int,
+        size: Int64,
         as type: T.Type,
         count: Int
-    ) -> [Int] {
-        let length = MemoryLayout<T>.size
+    ) -> [Int64] {
+        let length = Int64(MemoryLayout<T>.size)
         guard size > length, count > 0 else { return [] }
         let span = size - length
-        let alignment = max(MemoryLayout<T>.alignment, 1)
-        let stride = max(span / count, alignment)
-        return (0..<count).map { i in
+        let alignment = Int64(max(MemoryLayout<T>.alignment, 1))
+        let stride = max(span / Int64(count), alignment)
+        return (0..<Int64(count)).map { i in
             let raw = (i * stride) % span
             return raw - (raw % alignment)
         }
