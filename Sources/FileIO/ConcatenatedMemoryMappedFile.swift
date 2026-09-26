@@ -70,7 +70,10 @@ extension ConcatenatedMemoryMappedFile {
             files.append(
                 .init(offset: fullSize, size: file.size, _file: file)
             )
-            fullSize += file.size
+            // Reachable on wasm32, whose memory can hold more than `Int.max`.
+            let (sum, overflow) = fullSize.addingReportingOverflow(file.size)
+            guard !overflow else { throw _sizeOverflowError() }
+            fullSize = sum
         }
         return .init(
             size: fullSize,

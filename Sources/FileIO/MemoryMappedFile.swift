@@ -227,7 +227,8 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         let count = data.count
         guard count > 0 else { return }
 
-        let newSize = size + count
+        let (newSize, overflow) = size.addingReportingOverflow(count)
+        guard !overflow else { throw _sizeOverflowError() }
         try resize(newSize: newSize)
 
         let tailSize = size - offset - count

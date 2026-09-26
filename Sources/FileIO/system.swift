@@ -204,6 +204,13 @@ internal func _currentSystemError() -> FileIOError {
     .system(code: errno)
 }
 
+/// A length that `Int` cannot hold, for files that only import Foundation
+/// and so cannot name `EOVERFLOW` on Android.
+@usableFromInline
+internal func _sizeOverflowError() -> FileIOError {
+    .system(code: EOVERFLOW)
+}
+
 #if os(Windows)
 /// `GetLastError` as an error, for the Win32 APIs that do not touch `errno`.
 internal func _lastWindowsError() -> FileIOError {
