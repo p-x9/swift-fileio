@@ -171,7 +171,7 @@ extension MemoryMappedFileTests {
             let file = try MemoryMappedFile.open(url: url, isWritable: true)
             try file.insertData(Data(), at: 2)
             file.sync()
-            XCTAssertEqual(file.size, initial.count)
+            XCTAssertEqual(file.size, Int64(initial.count))
             XCTAssertEqual(try Data(contentsOf: url), initial)
         }
     }
@@ -351,7 +351,7 @@ extension MemoryMappedFileTests {
             XCTAssertEqual(tail.count, 3)
             XCTAssertEqual(tail.pointer.load(as: UInt8.self), 6)
 
-            for offset in [8, 9, -1] {
+            for offset in [8, 9, -1] as [Int64] {
                 XCTAssertThrowsError(
                     try file.unsafeRegion(at: offset), "\(offset)"
                 ) { error in
@@ -403,7 +403,7 @@ extension MemoryMappedFileTests {
         defer { try? FileManager.default.removeItem(at: url) }
 
         let file = try MemoryMappedFile.open(url: url, isWritable: false)
-        XCTAssertEqual(file.size, contents.count)
+        XCTAssertEqual(file.size, Int64(contents.count))
         XCTAssertEqual(try file.readAllData(), contents)
     }
 
@@ -414,7 +414,7 @@ extension MemoryMappedFileTests {
         let initial = Data([1, 2, 3, 4])
         try withTemporaryFile(size: initial.count, contents: initial) { url in
             let file = try MemoryMappedFile.open(url: url, isWritable: true)
-            try file.delete(offset: 0, length: initial.count)
+            try file.delete(offset: 0, length: Int64(initial.count))
 
             XCTAssertEqual(file.size, 0)
             XCTAssertEqual(try file.readAllData(), Data())

@@ -10,18 +10,18 @@ import Foundation
 
 public final class ConcatenatedStreamedFile: StreamedFileIOProtocol {
     public struct FileSegment {
-        public let offset: Int
-        public let size: Int
+        public let offset: Int64
+        public let size: Int64
         public let _file: StreamedFile
     }
 
-    public let size: Int
+    public let size: Int64
     public let isWritable: Bool
 
     public let _files: [FileSegment]
 
     private init(
-        size: Int,
+        size: Int64,
         isWritable: Bool,
         files: [FileSegment]
     ) {
@@ -41,7 +41,7 @@ extension ConcatenatedStreamedFile {
         isWritable: Bool
     ) throws -> ConcatenatedStreamedFile {
         var files: [FileSegment] = []
-        var fullSize: Int = 0
+        var fullSize: Int64 = 0
         for url in urls {
             let file: StreamedFile = try .open(url: url, isWritable: isWritable)
             files.append(.init(offset: fullSize, size: file.size, _file: file))
@@ -60,7 +60,7 @@ extension ConcatenatedStreamedFile {
 
 extension ConcatenatedStreamedFile {
     @inlinable @inline(__always)
-    public func _file(for offset: Int) throws -> FileSegment {
+    public func _file(for offset: Int64) throws -> FileSegment {
         guard let file = _files.first(
             where: { _isInBounds(offset &- $0.offset, length: 1, in: $0.size) }
         ) else {
@@ -73,8 +73,8 @@ extension ConcatenatedStreamedFile {
 // Must support reading and writing of boundaries between files.
 extension ConcatenatedStreamedFile {
     @inlinable @inline(__always)
-    public func readData(offset: Int, length: Int) throws -> Data {
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
+    public func readData(offset: Int64, length: Int) throws -> Data {
+        guard _fastPath(_isInBounds(offset, length: Int64(length), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -85,7 +85,9 @@ extension ConcatenatedStreamedFile {
         while remaining > 0 {
             let file = try _file(for: currentOffset)
             let localOffset = currentOffset - file.offset
-            let readable = min(remaining, file.size - localOffset)
+            let readable = Int(
+                truncatingIfNeeded: min(Int64(remaining), file.size - localOffset)
+            )
 
             let chunk = file._file._uncheckedReadData(
                 offset: localOffset,
@@ -93,17 +95,17 @@ extension ConcatenatedStreamedFile {
             )
             result.append(chunk)
 
-            currentOffset += readable
+            currentOffset += Int64(readable)
             remaining -= readable
         }
         return result
     }
 
     @inlinable @inline(__always)
-    public func writeData(_ data: Data, at offset: Int) throws {
+    public func writeData(_ data: Data, at offset: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let count = data.count
-        guard _fastPath(_isInBounds(offset, length: count, in: size)) else {
+        guard _fastPath(_isInBounds(offset, length: Int64(count), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
 
@@ -114,13 +116,15 @@ extension ConcatenatedStreamedFile {
         while remaining > 0 {
             let file = try _file(for: currentOffset)
             let localOffset = currentOffset - file.offset
-            let writable = min(remaining, file.size - localOffset)
+            let writable = Int(
+                truncatingIfNeeded: min(Int64(remaining), file.size - localOffset)
+            )
 
             let slice = data.subdata(in: written ..< written + writable)
             try file._file._uncheckedWriteData(slice, at: localOffset)
 
             written += writable
-            currentOffset += writable
+            currentOffset += Int64(writable)
             remaining -= writable
         }
     }
@@ -134,17 +138,17 @@ extension ConcatenatedStreamedFile {
 extension ConcatenatedStreamedFile {
     @_disfavoredOverload
     @inlinable @inline(__always)
-    public func read<T>(offset: Int) throws -> T {
+    public func read<T>(offset: Int64) throws -> T {
         try read(offset: offset, as: T.self)
     }
 
     @inlinable @inline(__always)
-    public func read<T>(offset: Int) throws -> Optional<T> {
+    public func read<T>(offset: Int64) throws -> Optional<T> {
         try read(offset: offset, as: T.self)
     }
 
     @inlinable @inline(__always)
-    public func read<T>(offset: Int, as: T.Type) throws -> T {
+    public func read<T>(offset: Int64, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
         let data = try readData(offset: offset, length: length)
         return data.withUnsafeBytes {
@@ -153,7 +157,7 @@ extension ConcatenatedStreamedFile {
     }
 
     @inlinable @inline(__always)
-    public func write<T>(_ value: T, at offset: Int) throws {
+    public func write<T>(_ value: T, at offset: Int64) throws {
         let data = withUnsafeBytes(of: value, {
             Data(buffer: $0.assumingMemoryBound(to: UInt8.self))
         })
@@ -165,8 +169,8 @@ extension ConcatenatedStreamedFile {
     public typealias FileSlice = StreamedFileSlice<ConcatenatedStreamedFile>
 
     public func fileSlice(
-        offset: Int,
-        length: Int
+        offset: Int64,
+        length: Int64
     ) throws -> FileSlice {
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
@@ -189,8 +193,8 @@ extension ConcatenatedStreamedFile {
     /// - Returns: A `FileSlice` that provides access to the specified portion of the file.
     /// - Throws: `FileIOError.offsetOutOfBounds` if the specified range is invalid.
     public func fileSlice(
-        offset: Int,
-        length: Int,
+        offset: Int64,
+        length: Int64,
         mode: FileSlice.Mode
     ) throws -> FileSlice {
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
