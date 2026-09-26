@@ -115,8 +115,9 @@ extension StreamedFile: ResizableFileIOProtocol {
         guard _fastPath(newSize >= 0) else { return }
         // `insertData` and `delete` both reach here with the current size when
         // asked to move nothing. Bumping there would invalidate every slice
-        // over a no-op.
-        guard newSize != size else { return }
+        // over a no-op. Compared unclamped, because `size` reads `Int.max`
+        // for any longer file.
+        guard UInt64(newSize) != fileHandle.seekToEndOfFile() else { return }
         generation &+= 1
         fileHandle.truncateFile(atOffset: UInt64(newSize))
     }
