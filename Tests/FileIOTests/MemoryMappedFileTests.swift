@@ -578,3 +578,41 @@ extension MemoryMappedFileTests {
         }
     }
 }
+
+extension MemoryMappedFileTests {
+    func testInitWithData() throws {
+        let data = Data([0x01, 0x02, 0x03, 0x04])
+        let file = try MemoryMappedFile(data: data)
+        XCTAssertEqual(file.size, 4)
+        XCTAssertFalse(file.isWritable)
+        XCTAssertEqual(try file.readAllData(), data)
+        XCTAssertThrowsError(try file.readData(offset: 3, length: 2)) { error in
+            XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
+        }
+        XCTAssertThrowsError(try file.writeData(Data([1]), at: 0)) { error in
+            XCTAssertEqual(error as? FileIOError, .notWritable)
+        }
+    }
+
+    func testInitWithEmptyData() throws {
+        let file = try MemoryMappedFile(data: Data())
+        XCTAssertEqual(file.size, 0)
+        XCTAssertEqual(try file.readAllData(), Data())
+    }
+
+    func testInitWithDataResize() throws {
+        let file = try MemoryMappedFile(data: Data([1, 2, 3, 4]), isWritable: true)
+
+        try file.insertData(Data([9, 9]), at: 2)
+        XCTAssertEqual(try file.readAllData(), Data([1, 2, 9, 9, 3, 4]))
+
+        try file.delete(offset: 1, length: 3)
+        XCTAssertEqual(try file.readAllData(), Data([1, 3, 4]))
+
+        try file.resize(newSize: 0)
+        XCTAssertEqual(file.size, 0)
+
+        try file.resize(newSize: 2)
+        XCTAssertEqual(try file.readAllData(), Data([0, 0]))
+    }
+}
