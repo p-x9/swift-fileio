@@ -201,7 +201,6 @@ public struct UnsafeContiguousRegion {
     /// beyond this leaves the mapping.
     public let count: Int
 
-    @inlinable
     public init(pointer: UnsafeMutableRawPointer, count: Int) {
         self.pointer = pointer
         self.count = count
