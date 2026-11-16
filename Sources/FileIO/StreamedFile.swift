@@ -11,10 +11,8 @@ import Foundation
 public final class StreamedFile: StreamedFileIOProtocol {
     @_spi(Core)
     public let fileHandle: FileHandle
-    /// Clamped rather than trapping if the file grows past `Int.max` after
-    /// opening, which a 32-bit target such as wasm32 can reach.
-    public var size: Int {
-        return Int(clamping: fileHandle.seekToEndOfFile())
+    public var size: Int64 {
+        Int64(clamping: fileHandle.seekToEndOfFile())
     }
     public private(set) var generation: Int = 0
 
@@ -37,23 +35,17 @@ extension StreamedFile {
         } else {
             try FileHandle(forReadingFrom: url)
         }
-        // Offsets are `Int`, so on 32-bit targets such as wasm32 the tail of
-        // a longer file could not be addressed.
-        guard fileHandle.seekToEndOfFile() <= UInt64(Int.max) else {
-            fileHandle.closeFile()
-            throw _sizeOverflowError()
-        }
         return .init(fileHandle: fileHandle, isWritable: isWritable)
     }
 }
 
 extension StreamedFile {
-    public func readData(offset: Int, length: Int) throws -> Data {
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
+    public func readData(offset: Int64, length: Int) throws -> Data {
+        guard _fastPath(_isInBounds(offset, length: Int64(length), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         fileHandle.seek(toFileOffset: UInt64(offset))
-        return fileHandle.readData(ofLength: Int(length))
+        return fileHandle.readData(ofLength: length)
     }
 
     /// Reads `length` bytes at `offset` without checking that they fit.
@@ -66,15 +58,15 @@ extension StreamedFile {
     ///
     /// - Precondition: `offset + length <= size`.
     @usableFromInline
-    internal func _uncheckedReadData(offset: Int, length: Int) -> Data {
+    internal func _uncheckedReadData(offset: Int64, length: Int) -> Data {
         fileHandle.seek(toFileOffset: UInt64(offset))
         return fileHandle.readData(ofLength: length)
     }
 
-    public func writeData(_ data: Data, at offset: Int) throws {
+    public func writeData(_ data: Data, at offset: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let count = data.count
-        guard _fastPath(_isInBounds(offset, length: count, in: size)) else {
+        guard _fastPath(_isInBounds(offset, length: Int64(count), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         fileHandle.seek(toFileOffset: UInt64(offset))
@@ -91,7 +83,7 @@ extension StreamedFile {
     /// - Precondition: `offset + data.count <= size`, and the file is
     ///   writable.
     @usableFromInline
-    internal func _uncheckedWriteData(_ data: Data, at offset: Int) throws {
+    internal func _uncheckedWriteData(_ data: Data, at offset: Int64) throws {
         fileHandle.seek(toFileOffset: UInt64(offset))
         if #available(macOS 10.15.4, iOS 13.4, watchOS 6.2, tvOS 13.4, *) {
             try fileHandle.write(contentsOf: data)
@@ -110,68 +102,77 @@ extension StreamedFile {
 }
 
 extension StreamedFile: ResizableFileIOProtocol {
-    public func resize(newSize: Int) throws {
+    public func resize(newSize: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(newSize >= 0) else { return }
         // `insertData` and `delete` both reach here with the current size when
         // asked to move nothing. Bumping there would invalidate every slice
-        // over a no-op. Compared unclamped, because `size` reads `Int.max`
-        // for any longer file.
-        guard UInt64(newSize) != fileHandle.seekToEndOfFile() else { return }
+        // over a no-op.
+        guard newSize != size else { return }
         generation &+= 1
         fileHandle.truncateFile(atOffset: UInt64(newSize))
     }
 
-    public func insertData(_ data: Data, at offset: Int) throws {
+    /// - Throws: `FileIOError.system` with `EOVERFLOW` if the bytes after
+    ///   `offset` are too many to hold in memory while they are moved.
+    public func insertData(_ data: Data, at offset: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
-        guard data.count > 0 else { return }
-        let (newSize, overflow) = size.addingReportingOverflow(data.count)
+        let count = Int64(data.count)
+        guard count > 0 else { return }
+        let (newSize, overflow) = size.addingReportingOverflow(count)
         guard !overflow else { throw _sizeOverflowError() }
 
-        let remainingData = try readData(offset: offset, length: size - offset)
+        let remainingData = try readData(
+            offset: offset,
+            length: _dataLength(size - offset)
+        )
         try resize(newSize: newSize)
 
-        try writeData(remainingData, at: offset + data.count)
+        try writeData(remainingData, at: offset + count)
 
         try writeData(data, at: offset)
     }
 
-    public func delete(offset: Int, length: Int) throws {
+    /// - Throws: `FileIOError.system` with `EOVERFLOW` if the bytes after the
+    ///   range are too many to hold in memory while they are moved.
+    public func delete(offset: Int64, length: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         guard length > 0 else { return }
+        let tailOffset = offset + length
+        let tailLength = try _dataLength(size - tailOffset)
 
         // Bumped before the tail moves rather than leaving it to `resize`
         // below: the shifting write can fail having already moved part of the
         // tail, and slices taken beforehand are wrong either way.
         generation &+= 1
 
-        let tailData = try readData(offset: offset + length, length: Int(size) - (offset + length))
+        let tailData = try readData(offset: tailOffset, length: tailLength)
         try writeData(tailData, at: offset)
 
-        try resize(newSize: Int(size) - length)
+        try resize(newSize: size - length)
     }
 }
 
 extension StreamedFile {
     @_disfavoredOverload
     @inlinable @inline(__always)
-    public func read<T>(offset: Int) throws -> T {
+    public func read<T>(offset: Int64) throws -> T {
         try read(offset: offset, as: T.self)
     }
 
     @inlinable @inline(__always)
-    public func read<T>(offset: Int) throws -> Optional<T> {
+    public func read<T>(offset: Int64) throws -> Optional<T> {
         try read(offset: offset, as: T.self)
     }
 
     @inlinable @inline(__always)
-    public func read<T>(offset: Int, as: T.Type) throws -> T {
+    public func read<T>(offset: Int64, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
         let data = try readData(offset: offset, length: length)
         return data.withUnsafeBytes {
@@ -180,7 +181,7 @@ extension StreamedFile {
     }
 
     @inlinable @inline(__always)
-    public func write<T>(_ value: T, at offset: Int) throws {
+    public func write<T>(_ value: T, at offset: Int64) throws {
         let data = withUnsafeBytes(of: value, {
             Data(buffer: $0.assumingMemoryBound(to: UInt8.self))
         })
@@ -192,8 +193,8 @@ extension StreamedFile {
     public typealias FileSlice = StreamedFileSlice<StreamedFile>
 
     public func fileSlice(
-        offset: Int,
-        length: Int
+        offset: Int64,
+        length: Int64
     ) throws -> FileSlice {
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
@@ -216,8 +217,8 @@ extension StreamedFile {
     /// - Returns: A `FileSlice` that provides access to the specified portion of the file.
     /// - Throws: `FileIOError.offsetOutOfBounds` if the specified range is invalid.
     public func fileSlice(
-        offset: Int,
-        length: Int,
+        offset: Int64,
+        length: Int64,
         mode: FileSlice.Mode
     ) throws -> FileSlice {
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
@@ -245,8 +246,8 @@ public final class StreamedFileSlice<Parent: StreamedFileIOProtocol>: FileIOSili
 
     public let parent: Parent
 
-    public private(set) var baseOffset: Int
-    public private(set) var size: Int
+    public private(set) var baseOffset: Int64
+    public private(set) var size: Int64
 
     public let isWritable: Bool
 
@@ -276,8 +277,8 @@ public final class StreamedFileSlice<Parent: StreamedFileIOProtocol>: FileIOSili
 
     init(
         parent: Parent,
-        baseOffset: Int,
-        size: Int,
+        baseOffset: Int64,
+        size: Int64,
         isWritable: Bool,
         mode: Mode
     ) throws {
@@ -291,16 +292,16 @@ public final class StreamedFileSlice<Parent: StreamedFileIOProtocol>: FileIOSili
         if mode == .buffered {
             self.buffer = try parent.readData(
                 offset: baseOffset,
-                length: size
+                length: _dataLength(size)
             )
         }
     }
 }
 
 extension StreamedFileSlice {
-    public func readData(offset: Int, length: Int) throws -> Data {
+    public func readData(offset: Int64, length: Int) throws -> Data {
         guard _fastPath(isValid) else { throw FileIOError.staleSlice }
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
+        guard _fastPath(_isInBounds(offset, length: Int64(length), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         switch mode {
@@ -311,22 +312,25 @@ extension StreamedFileSlice {
             )
         case .buffered:
             guard let buffer else { throw FileIOError.offsetOutOfBounds }
-            return buffer.subdata(in: offset..<offset + length)
+            // The buffer holds the whole slice, so `offset` fits `Int`.
+            let start = Int(truncatingIfNeeded: offset)
+            return buffer.subdata(in: start..<start + length)
         }
     }
 
-    public func writeData(_ data: Data, at offset: Int) throws {
+    public func writeData(_ data: Data, at offset: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(isValid) else { throw FileIOError.staleSlice }
         let count = data.count
-        guard _fastPath(_isInBounds(offset, length: count, in: size)) else {
+        guard _fastPath(_isInBounds(offset, length: Int64(count), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         switch mode {
         case .direct:
             try parent.writeData(data, at: baseOffset + offset)
         case .buffered:
-            buffer?.replaceSubrange(offset..<offset + count, with: data)
+            let start = Int(truncatingIfNeeded: offset)
+            buffer?.replaceSubrange(start..<start + count, with: data)
         }
     }
 
@@ -356,7 +360,7 @@ extension StreamedFileSlice {
 
         let buffer = try? parent.readData(
             offset: baseOffset,
-            length: size
+            length: _dataLength(size)
         )
         guard let buffer else { return }
         self.buffer = buffer
@@ -366,17 +370,17 @@ extension StreamedFileSlice {
 extension StreamedFileSlice {
     @_disfavoredOverload
     @inlinable @inline(__always)
-    public func read<T>(offset: Int) throws -> T {
+    public func read<T>(offset: Int64) throws -> T {
         try read(offset: offset, as: T.self)
     }
 
     @inlinable @inline(__always)
-    public func read<T>(offset: Int) throws -> Optional<T> {
+    public func read<T>(offset: Int64) throws -> Optional<T> {
         try read(offset: offset, as: T.self)
     }
 
     @inlinable @inline(__always)
-    public func read<T>(offset: Int, as: T.Type) throws -> T {
+    public func read<T>(offset: Int64, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
         let data = try readData(offset: offset, length: length)
         return data.withUnsafeBytes {
@@ -385,7 +389,7 @@ extension StreamedFileSlice {
     }
 
     @inlinable @inline(__always)
-    public func write<T>(_ value: T, at offset: Int) throws {
+    public func write<T>(_ value: T, at offset: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let data = withUnsafeBytes(of: value, {
             Data(buffer: $0.assumingMemoryBound(to: UInt8.self))

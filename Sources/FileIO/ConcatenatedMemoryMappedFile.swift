@@ -24,19 +24,19 @@ import Foundation
 /// undefined.
 public final class ConcatenatedMemoryMappedFile: MemoryMappedFileIOProtocol {
     public struct FileSegment {
-        public let offset: Int
-        public let size: Int
+        public let offset: Int64
+        public let size: Int64
         public let _file: MemoryMappedFile
     }
 
-    public private(set) var size: Int
+    public private(set) var size: Int64
 
     public let isWritable: Bool
 
     public let _files: [FileSegment]
 
     private init(
-        size: Int,
+        size: Int64,
         isWritable: Bool,
         files: [FileSegment]
     ) {
@@ -64,7 +64,7 @@ extension ConcatenatedMemoryMappedFile {
         isWritable: Bool
     ) throws -> ConcatenatedMemoryMappedFile {
         var files: [FileSegment] = []
-        var fullSize = 0
+        var fullSize: Int64 = 0
         for url in urls {
             let file = try MemoryMappedFile.open(url: url, isWritable: isWritable)
             files.append(
@@ -85,7 +85,7 @@ extension ConcatenatedMemoryMappedFile {
 
 extension ConcatenatedMemoryMappedFile {
     @inlinable @inline(__always)
-    public func _file(for offset: Int) throws -> FileSegment {
+    public func _file(for offset: Int64) throws -> FileSegment {
         guard let file = _files.first(
             where: { _isInBounds(offset &- $0.offset, length: 1, in: $0.size) }
         ) else {
@@ -104,12 +104,12 @@ extension ConcatenatedMemoryMappedFile {
     /// - Throws: `FileIOError.offsetOutOfBounds` if `offset` is not within
     ///   the file.
     @inlinable @inline(__always)
-    public func unsafeRegion(at offset: Int) throws -> UnsafeContiguousRegion {
+    public func unsafeRegion(at offset: Int64) throws -> UnsafeContiguousRegion {
         let segment = try _file(for: offset)
         let localOffset = offset - segment.offset
         return .init(
-            pointer: segment._file.ptr.advanced(by: localOffset),
-            count: segment.size - localOffset
+            pointer: segment._file._pointer(at: localOffset),
+            count: Int(truncatingIfNeeded: segment.size - localOffset)
         )
     }
 }
@@ -117,15 +117,15 @@ extension ConcatenatedMemoryMappedFile {
 // Must support reading and writing of boundaries between files.
 extension ConcatenatedMemoryMappedFile {
     @inlinable @inline(__always)
-    public func readData(offset: Int, length: Int) throws -> Data {
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
+    public func readData(offset: Int64, length: Int) throws -> Data {
+        guard _fastPath(_isInBounds(offset, length: Int64(length), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         guard length > 0 else { return Data() }
 
         let segment = try _file(for: offset)
         let localOffset = offset - segment.offset
-        if _fastPath(length <= segment.size - localOffset) {
+        if _fastPath(Int64(length) <= segment.size - localOffset) {
             return try segment._file.readData(offset: localOffset, length: length)
         }
 
@@ -136,30 +136,32 @@ extension ConcatenatedMemoryMappedFile {
         while remaining > 0 {
             let segment = try _file(for: currentOffset)
             let localOffset = currentOffset - segment.offset
-            let readable = min(remaining, segment.size - localOffset)
+            let readable = Int(
+                truncatingIfNeeded: min(Int64(remaining), segment.size - localOffset)
+            )
 
             result.append(
                 try segment._file.readData(offset: localOffset, length: readable)
             )
 
-            currentOffset += readable
+            currentOffset += Int64(readable)
             remaining -= readable
         }
         return result
     }
 
     @inlinable @inline(__always)
-    public func writeData(_ data: Data, at offset: Int) throws {
+    public func writeData(_ data: Data, at offset: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let count = data.count
-        guard _fastPath(_isInBounds(offset, length: count, in: size)) else {
+        guard _fastPath(_isInBounds(offset, length: Int64(count), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         guard count > 0 else { return }
 
         let segment = try _file(for: offset)
         let localOffset = offset - segment.offset
-        if _fastPath(count <= segment.size - localOffset) {
+        if _fastPath(Int64(count) <= segment.size - localOffset) {
             try segment._file.writeData(data, at: localOffset)
             return
         }
@@ -171,7 +173,9 @@ extension ConcatenatedMemoryMappedFile {
         while remaining > 0 {
             let segment = try _file(for: currentOffset)
             let localOffset = currentOffset - segment.offset
-            let writable = min(remaining, segment.size - localOffset)
+            let writable = Int(
+                truncatingIfNeeded: min(Int64(remaining), segment.size - localOffset)
+            )
 
             try segment._file.writeData(
                 data.subdata(in: written ..< written + writable),
@@ -179,7 +183,7 @@ extension ConcatenatedMemoryMappedFile {
             )
 
             written += writable
-            currentOffset += writable
+            currentOffset += Int64(writable)
             remaining -= writable
         }
     }
@@ -193,17 +197,17 @@ extension ConcatenatedMemoryMappedFile {
 extension ConcatenatedMemoryMappedFile {
     @_disfavoredOverload
     @inlinable @inline(__always)
-    public func read<T>(offset: Int) throws -> T {
+    public func read<T>(offset: Int64) throws -> T {
         try read(offset: offset, as: T.self)
     }
 
     @inlinable @inline(__always)
-    public func read<T>(offset: Int) throws -> Optional<T> {
+    public func read<T>(offset: Int64) throws -> Optional<T> {
         try read(offset: offset, as: T.self)
     }
 
     @inlinable @inline(__always)
-    public func read<T>(offset: Int, as: T.Type) throws -> T {
+    public func read<T>(offset: Int64, as: T.Type) throws -> T {
         let length = MemoryLayout<T>.size
 
         // No whole-file check first: `_file(for:)` already rejects an offset
@@ -211,7 +215,7 @@ extension ConcatenatedMemoryMappedFile {
         // of the two. The read used to be checked three times over.
         let segment = try _file(for: offset)
         let localOffset = offset - segment.offset
-        if _fastPath(length <= segment.size - localOffset) {
+        if _fastPath(Int64(length) <= segment.size - localOffset) {
             return segment._file._uncheckedRead(at: localOffset, as: T.self)
         }
 
@@ -223,7 +227,7 @@ extension ConcatenatedMemoryMappedFile {
     }
 
     @inlinable @inline(__always)
-    public func write<T>(_ value: T, at offset: Int) throws {
+    public func write<T>(_ value: T, at offset: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         let length = MemoryLayout<T>.size
 
@@ -231,7 +235,7 @@ extension ConcatenatedMemoryMappedFile {
         // holds, and the segment check below is the stricter one.
         let segment = try _file(for: offset)
         let localOffset = offset - segment.offset
-        if _fastPath(length <= segment.size - localOffset) {
+        if _fastPath(Int64(length) <= segment.size - localOffset) {
             segment._file._uncheckedWrite(value, at: localOffset)
             return
         }
@@ -247,8 +251,8 @@ extension ConcatenatedMemoryMappedFile {
     public typealias FileSlice = ConcatenatedMemoryMappedFileSlice
 
     public func fileSlice(
-        offset: Int,
-        length: Int
+        offset: Int64,
+        length: Int64
     ) throws -> FileSlice {
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
             throw FileIOError.offsetOutOfBounds
@@ -270,15 +274,15 @@ extension ConcatenatedMemoryMappedFile {
 public final class ConcatenatedMemoryMappedFileSlice: FileIOSiliceProtocol, _MemoryMappedFileIOProtocol {
     public let parent: ConcatenatedMemoryMappedFile
 
-    public private(set) var baseOffset: Int
-    public private(set) var size: Int
+    public private(set) var baseOffset: Int64
+    public private(set) var size: Int64
 
     public let isWritable: Bool
 
     init(
         parent: ConcatenatedMemoryMappedFile,
-        baseOffset: Int,
-        size: Int,
+        baseOffset: Int64,
+        size: Int64,
         isWritable: Bool
     ) {
         self.parent = parent
@@ -293,29 +297,29 @@ extension ConcatenatedMemoryMappedFileSlice {
     /// still bounded by the parent's segments, and is additionally clamped to
     /// the end of this slice.
     @inlinable @inline(__always)
-    public func unsafeRegion(at offset: Int) throws -> UnsafeContiguousRegion {
+    public func unsafeRegion(at offset: Int64) throws -> UnsafeContiguousRegion {
         guard _fastPath(_isInBounds(offset, length: 1, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         let region = try parent.unsafeRegion(at: baseOffset + offset)
         return .init(
             pointer: region.pointer,
-            count: min(region.count, size - offset)
+            count: min(region.count, Int(truncatingIfNeeded: size - offset))
         )
     }
 
     @inlinable @inline(__always)
-    public func readData(offset: Int, length: Int) throws -> Data {
-        guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
+    public func readData(offset: Int64, length: Int) throws -> Data {
+        guard _fastPath(_isInBounds(offset, length: Int64(length), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         return try parent.readData(offset: baseOffset + offset, length: length)
     }
 
     @inlinable @inline(__always)
-    public func writeData(_ data: Data, at offset: Int) throws {
+    public func writeData(_ data: Data, at offset: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
-        guard _fastPath(_isInBounds(offset, length: data.count, in: size)) else {
+        guard _fastPath(_isInBounds(offset, length: Int64(data.count), in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
         try parent.writeData(data, at: baseOffset + offset)
@@ -330,19 +334,19 @@ extension ConcatenatedMemoryMappedFileSlice {
 extension ConcatenatedMemoryMappedFileSlice {
     @_disfavoredOverload
     @inlinable @inline(__always)
-    public func read<T>(offset: Int) throws -> T {
+    public func read<T>(offset: Int64) throws -> T {
         try read(offset: offset, as: T.self)
     }
 
     @inlinable @inline(__always)
-    public func read<T>(offset: Int) throws -> Optional<T> {
+    public func read<T>(offset: Int64) throws -> Optional<T> {
         try read(offset: offset, as: T.self)
     }
 
     @inlinable @inline(__always)
-    public func read<T>(offset: Int, as: T.Type) throws -> T {
+    public func read<T>(offset: Int64, as: T.Type) throws -> T {
         guard _fastPath(
-            _isInBounds(offset, length: MemoryLayout<T>.size, in: size)
+            _isInBounds(offset, length: Int64(MemoryLayout<T>.size), in: size)
         ) else {
             throw FileIOError.offsetOutOfBounds
         }
@@ -350,10 +354,10 @@ extension ConcatenatedMemoryMappedFileSlice {
     }
 
     @inlinable @inline(__always)
-    public func write<T>(_ value: T, at offset: Int) throws {
+    public func write<T>(_ value: T, at offset: Int64) throws {
         guard isWritable else { throw FileIOError.notWritable }
         guard _fastPath(
-            _isInBounds(offset, length: MemoryLayout<T>.size, in: size)
+            _isInBounds(offset, length: Int64(MemoryLayout<T>.size), in: size)
         ) else {
             throw FileIOError.offsetOutOfBounds
         }

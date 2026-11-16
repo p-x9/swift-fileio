@@ -219,3 +219,40 @@ extension StreamedFileTests {
         }
     }
 }
+
+// Not on Windows, where NTFS files are not sparse by default and this would
+// write 5 GiB of zeros.
+#if !os(Windows)
+extension StreamedFileTests {
+    /// Offsets past 4 GiB, which a 32-bit `Int` cannot express.
+    func testOffsetsBeyondFourGiB() throws {
+        let length: Int64 = 5 << 30
+        try withTemporaryFile(size: 0) { url in
+            let handle = try FileHandle(forUpdating: url)
+            handle.truncateFile(atOffset: UInt64(length))
+            handle.closeFile()
+
+            let file = try StreamedFile.open(url: url, isWritable: true)
+            XCTAssertEqual(file.size, length)
+
+            try file.write(UInt32(0xDEADBEEF), at: length - 4)
+            XCTAssertEqual(
+                try file.read(offset: length - 4, as: UInt32.self),
+                0xDEADBEEF
+            )
+
+            let slice = try file.fileSlice(offset: length - 8, length: 8, mode: .direct)
+            XCTAssertEqual(slice.baseOffset, length - 8)
+            XCTAssertEqual(try slice.read(offset: 4, as: UInt32.self), 0xDEADBEEF)
+
+            if MemoryLayout<Int>.size == 4 {
+                XCTAssertThrowsError(try file.readAllData()) { error in
+                    guard case .system = error as? FileIOError else {
+                        return XCTFail("unexpected error: \(error)")
+                    }
+                }
+            }
+        }
+    }
+}
+#endif

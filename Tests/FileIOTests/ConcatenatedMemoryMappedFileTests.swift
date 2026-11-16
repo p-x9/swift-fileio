@@ -147,11 +147,11 @@ extension ConcatenatedMemoryMappedFileTests {
                 urls: urls,
                 isWritable: true
             )
-            XCTAssertEqual(file.size, size * 2)
+            XCTAssertEqual(file.size, Int64(size * 2))
 
             // Two bytes before the seam, two bytes after it.
             let payload = Data([0x01, 0x02, 0x03, 0x04])
-            try file.writeData(payload, at: size - 2)
+            try file.writeData(payload, at: Int64(size - 2))
             file.sync()
 
             let first = try Data(contentsOf: urls[0])
@@ -191,9 +191,9 @@ extension ConcatenatedMemoryMappedFileTests {
                 urls: urls,
                 isWritable: false
             )
-            XCTAssertEqual(file.size, a + b + c)
-            XCTAssertEqual(try file.readData(offset: a - 1, length: 2), Data([0xAA, 0xBB]))
-            XCTAssertEqual(try file.readData(offset: a + b - 1, length: 2), Data([0xBB, 0xCC]))
+            XCTAssertEqual(file.size, Int64(a + b + c))
+            XCTAssertEqual(try file.readData(offset: Int64(a - 1), length: 2), Data([0xAA, 0xBB]))
+            XCTAssertEqual(try file.readData(offset: Int64(a + b - 1), length: 2), Data([0xBB, 0xCC]))
             XCTAssertEqual(
                 try file.readAllData(),
                 Data(repeating: 0xAA, count: a)
@@ -215,7 +215,7 @@ extension ConcatenatedMemoryMappedFileTests {
                 urls: urls,
                 isWritable: false
             )
-            let read = try file.readData(offset: size - 2, length: size + 4)
+            let read = try file.readData(offset: Int64(size - 2), length: size + 4)
             XCTAssertEqual(
                 read,
                 Data(repeating: 0x10, count: 2)
@@ -246,15 +246,15 @@ extension ConcatenatedMemoryMappedFileTests {
             XCTAssertEqual(r0.pointer.load(as: UInt8.self), 0xAA)
             XCTAssertEqual(r0.buffer.count, a)
 
-            let r1 = try file.unsafeRegion(at: a - 1)
+            let r1 = try file.unsafeRegion(at: Int64(a - 1))
             XCTAssertEqual(r1.count, 1, "one byte left in segment 0")
             XCTAssertEqual(r1.pointer.load(as: UInt8.self), 0xAA)
 
-            let r2 = try file.unsafeRegion(at: a)
+            let r2 = try file.unsafeRegion(at: Int64(a))
             XCTAssertEqual(r2.count, b, "crossing the seam starts segment 1")
             XCTAssertEqual(r2.pointer.load(as: UInt8.self), 0xBB)
 
-            XCTAssertThrowsError(try file.unsafeRegion(at: a + b)) { error in
+            XCTAssertThrowsError(try file.unsafeRegion(at: Int64(a + b))) { error in
                 XCTAssertEqual(error as? FileIOError, .offsetOutOfBounds)
             }
         }
@@ -275,10 +275,10 @@ extension ConcatenatedMemoryMappedFileTests {
                 isWritable: true
             )
             // Two bytes before the seam: the UInt32 spans both files.
-            try file.write(UInt32(0xDEADBEEF), at: size - 2)
+            try file.write(UInt32(0xDEADBEEF), at: Int64(size - 2))
             file.sync()
 
-            XCTAssertEqual(try file.read(offset: size - 2, as: UInt32.self), 0xDEADBEEF)
+            XCTAssertEqual(try file.read(offset: Int64(size - 2), as: UInt32.self), 0xDEADBEEF)
 
             let first = try Data(contentsOf: urls[0])
             let second = try Data(contentsOf: urls[1])
@@ -302,7 +302,7 @@ extension ConcatenatedMemoryMappedFileTests {
                 urls: urls,
                 isWritable: true
             )
-            let slice = try file.fileSlice(offset: size - 4, length: 8)
+            let slice = try file.fileSlice(offset: Int64(size - 4), length: 8)
             XCTAssertEqual(slice.size, 8)
             XCTAssertEqual(
                 try slice.readAllData(),
@@ -316,7 +316,7 @@ extension ConcatenatedMemoryMappedFileTests {
             try slice.writeData(Data([1, 2, 3, 4, 5, 6]), at: 1)
             slice.sync()
             XCTAssertEqual(
-                try file.readData(offset: size - 3, length: 6),
+                try file.readData(offset: Int64(size - 3), length: 6),
                 Data([1, 2, 3, 4, 5, 6])
             )
         }
@@ -359,7 +359,7 @@ extension ConcatenatedMemoryMappedFileTests {
             )
             XCTAssertEqual(file.size, 8)
 
-            for offset in [-1, 8, 9, Int.min, Int.max] {
+            for offset in [-1, 8, 9, Int64.min, Int64.max] {
                 XCTAssertThrowsError(
                     try file.read(offset: offset, as: UInt8.self)
                 ) { error in

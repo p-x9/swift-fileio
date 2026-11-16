@@ -57,20 +57,19 @@ extension FileIOError: CustomStringConvertible {
 
 /// Single-comparison bounds check that rejects negative `offset`/`length`
 /// and any `offset + length` that would exceed `size`, without going through
-/// signed overflow that could trap. Negative `Int` becomes a huge `UInt`
+/// signed overflow that could trap. Negative `Int64` becomes a huge `UInt64`
 /// via `bitPattern`, so it fails the `<= size` comparison naturally.
 /// `size` is assumed non-negative.
-@usableFromInline
 @inlinable
 @inline(__always)
-internal func _isInBounds(_ offset: Int, length: Int, in size: Int) -> Bool {
-    let usize = UInt(bitPattern: size)
-    return UInt(bitPattern: offset) <= usize
-        && UInt(bitPattern: length) <= usize &- UInt(bitPattern: offset)
+internal func _isInBounds(_ offset: Int64, length: Int64, in size: Int64) -> Bool {
+    let usize = UInt64(bitPattern: size)
+    return UInt64(bitPattern: offset) <= usize
+        && UInt64(bitPattern: length) <= usize &- UInt64(bitPattern: offset)
 }
 
 public protocol _FileIOProtocol {
-    var size: Int { get }
+    var size: Int64 { get }
 
     /// Changes whenever an operation moves the bytes that offsets into this
     /// file address. A slice records it when it is made and refuses to work
@@ -112,7 +111,7 @@ public protocol _FileIOProtocol {
     ///   - length: The number of bytes to read.
     /// - Returns: A `Data` object containing the read bytes.
     /// - Throws: `FileIOError.offsetOutOfBounds` if the specified range is invalid.
-    func readData(offset: Int, length: Int) throws -> Data
+    func readData(offset: Int64, length: Int) throws -> Data
 
     /// Writes data to the file at the specified offset.
     ///
@@ -122,14 +121,14 @@ public protocol _FileIOProtocol {
     /// - Throws:
     ///   - `FileIOError.notWritable` if the file is not writable.
     ///   - `FileIOError.offsetOutOfBounds` if the offset is invalid.
-    func writeData(_ data: Data, at offset: Int) throws
+    func writeData(_ data: Data, at offset: Int64) throws
 
     /// Ensures that any pending data modifications are written to the file.
     func sync()
 
-    func read<T>(offset: Int) throws -> T
-    func read<T>(offset: Int, as: T.Type) throws -> T
-    func write<T>(_ value: T, at offset: Int) throws
+    func read<T>(offset: Int64) throws -> T
+    func read<T>(offset: Int64, as: T.Type) throws -> T
+    func write<T>(_ value: T, at offset: Int64) throws
 }
 
 public protocol FileIOProtocol: _FileIOProtocol {
@@ -151,11 +150,11 @@ public protocol FileIOProtocol: _FileIOProtocol {
     ///   - length: The size of the slice in bytes.
     /// - Returns: A `FileSlice` that provides access to the specified portion of the file.
     /// - Throws: `FileIOError.offsetOutOfBounds` if the specified range is invalid.
-    func fileSlice(offset: Int, length: Int) throws -> FileSlice
+    func fileSlice(offset: Int64, length: Int64) throws -> FileSlice
 }
 
 public protocol FileIOSiliceProtocol: _FileIOProtocol {
-    var baseOffset: Int { get }
+    var baseOffset: Int64 { get }
 }
 
 /// - Important: A conformer must implement ``_FileIOProtocol/generation`` and
@@ -171,7 +170,7 @@ public protocol ResizableFileIOProtocol: _FileIOProtocol {
     /// - Throws:
     ///   - `FileIOError.notWritable` if the file is not writable.
     ///   - `FileIOError.offsetOutOfBounds` if the offset is invalid.
-    func insertData(_ data: Data, at offset: Int) throws
+    func insertData(_ data: Data, at offset: Int64) throws
 
     /// Deletes a specified range of bytes from the file, shifting remaining data.
     ///
@@ -181,7 +180,7 @@ public protocol ResizableFileIOProtocol: _FileIOProtocol {
     /// - Throws:
     ///   - `FileIOError.notWritable` if the file is not writable.
     ///   - `FileIOError.offsetOutOfBounds` if the specified range is invalid.
-    func delete(offset: Int, length: Int) throws
+    func delete(offset: Int64, length: Int64) throws
 }
 
 /// A run of bytes that is contiguous in memory, and how far it extends.
@@ -219,7 +218,7 @@ public protocol _MemoryMappedFileIOProtocol: _FileIOProtocol {
     ///
     /// - Throws: `FileIOError.offsetOutOfBounds` if `offset` is not within
     ///   the file.
-    func unsafeRegion(at offset: Int) throws -> UnsafeContiguousRegion
+    func unsafeRegion(at offset: Int64) throws -> UnsafeContiguousRegion
 }
 
 /// A mapping that is backed by a single contiguous region, and so can offer a
@@ -235,11 +234,15 @@ public protocol _SingleMemoryMappedFileIOProtocol: _MemoryMappedFileIOProtocol {
 
 extension _SingleMemoryMappedFileIOProtocol {
     @inlinable @inline(__always)
-    public func unsafeRegion(at offset: Int) throws -> UnsafeContiguousRegion {
+    public func unsafeRegion(at offset: Int64) throws -> UnsafeContiguousRegion {
         guard _fastPath(_isInBounds(offset, length: 1, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
-        return .init(pointer: ptr.advanced(by: offset), count: size - offset)
+        // A single mapping lies within the address space, so both fit `Int`.
+        return .init(
+            pointer: ptr.advanced(by: Int(truncatingIfNeeded: offset)),
+            count: Int(truncatingIfNeeded: size - offset)
+        )
     }
 }
 
@@ -267,7 +270,7 @@ extension _FileIOProtocol {
     /// - Returns: A `Data` object containing the read bytes.
     /// - Throws: `FileIOError.offsetOutOfBounds` if the specified range is invalid.
     public func readData(
-        offset: Int,
+        offset: Int64,
         upToCount count: Int
     ) throws -> Data {
         // Ahead of the bounds check, as everywhere else: a stale slice's own
@@ -279,7 +282,8 @@ extension _FileIOProtocol {
         guard _fastPath(_isInBounds(offset, length: 0, in: size)) else {
             throw FileIOError.offsetOutOfBounds
         }
-        let length = min(count, size - offset)
+        // No larger than `count`, so it fits `Int`.
+        let length = Int(truncatingIfNeeded: min(Int64(count), size - offset))
         return try readData(offset: offset, length: length)
     }
 
@@ -288,8 +292,9 @@ extension _FileIOProtocol {
     /// - Returns: A `Data` object containing all bytes in the file, from offset `0`
     ///   up to the current file size.
     /// - Throws: `FileIOError.offsetOutOfBounds` if the file size is invalid or
-    ///   cannot be read.
+    ///   cannot be read, and `FileIOError.system` with `EOVERFLOW` if the file
+    ///   is too large for a single `Data`.
     public func readAllData() throws -> Data {
-        try readData(offset: 0, length: size)
+        try readData(offset: 0, length: _dataLength(size))
     }
 }
