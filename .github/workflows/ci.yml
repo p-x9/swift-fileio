@@ -36,6 +36,21 @@ jobs:
       - name: Test
         run: swift test
 
+      - name: Compile FileIO for iOS distribution
+        run: |
+          output_dir="$(mktemp -d)"
+          trap 'rm -rf "$output_dir"' EXIT
+          xcrun --sdk iphoneos swiftc \
+            -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            -target arm64-apple-ios15.0 \
+            -swift-version 5 \
+            -parse-as-library \
+            -module-name FileIO \
+            -enable-library-evolution \
+            -emit-module -emit-module-path "$output_dir/FileIO.swiftmodule" \
+            -emit-module-interface-path "$output_dir/FileIO.swiftinterface" \
+            Sources/FileIO/*.swift
+
   linux-build:
     name: Linux Test
     runs-on: ubuntu-22.04
