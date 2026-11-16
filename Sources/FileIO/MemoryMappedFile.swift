@@ -100,6 +100,43 @@ extension MemoryMappedFile {
 }
 
 extension MemoryMappedFile {
+    /// Creates an in-memory file holding a copy of `data`.
+    public convenience init(data: Data, isWritable: Bool = false) throws {
+        let size = data.count
+        guard _fastPath(size > 0) else {
+            self.init(
+                fileDescriptor: -1,
+                ptr: MemoryMappedFile.emptyPlaceholder(),
+                size: 0,
+                isWritable: isWritable
+            )
+            return
+        }
+
+        let ptr = try _anonymousMemoryMap(length: size)
+        data.copyBytes(
+            to: UnsafeMutableRawBufferPointer(start: ptr, count: size)
+        )
+
+        if !isWritable {
+            do {
+                try _memoryProtectReadOnly(ptr, length: size)
+            } catch {
+                _memoryUnmap(ptr, length: size)
+                throw error
+            }
+        }
+
+        self.init(
+            fileDescriptor: -1,
+            ptr: ptr,
+            size: size,
+            isWritable: isWritable
+        )
+    }
+}
+
+extension MemoryMappedFile {
     @inlinable @inline(__always)
     public func readData(offset: Int, length: Int) throws -> Data {
         guard _fastPath(_isInBounds(offset, length: length, in: size)) else {
@@ -193,6 +230,12 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
         // if the resize then fails partway.
         generation &+= 1
 
+        // No file to truncate, so map a new region and copy across.
+        guard fileDescriptor >= 0 else {
+            try resizeAnonymous(newSize: newSize)
+            return
+        }
+
         // Unmap before resizing: Windows refuses to shrink a file that still
         // has a view open on it, with EACCES. POSIX does not mind the order.
         unmap()
@@ -214,6 +257,21 @@ extension MemoryMappedFile: ResizableFileIOProtocol {
             isWritable: isWritable
         )
         self.ptr.deallocate()
+        self.ptr = mapped
+        self.size = newSize
+    }
+
+    private func resizeAnonymous(newSize: Int) throws {
+        let mapped = newSize > 0
+            ? try _anonymousMemoryMap(length: newSize)
+            : Self.emptyPlaceholder()
+
+        let kept = min(size, newSize)
+        if kept > 0 {
+            memcpy(mapped, ptr, kept)
+        }
+
+        unmap()
         self.ptr = mapped
         self.size = newSize
     }

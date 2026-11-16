@@ -162,7 +162,65 @@ internal func _memoryMap(
 #endif
 }
 
-/// Releases a mapping made by ``_memoryMap(fileDescriptor:length:isWritable:)``.
+/// Maps `length` bytes of zeroed, writable memory backed by no file.
+internal func _anonymousMemoryMap(length: Int) throws -> UnsafeMutableRawPointer {
+#if os(Windows)
+    let size = UInt64(length)
+    guard let mapping = CreateFileMappingW(
+        INVALID_HANDLE_VALUE,
+        nil,
+        DWORD(PAGE_READWRITE),
+        DWORD(truncatingIfNeeded: size >> 32),
+        DWORD(truncatingIfNeeded: size),
+        nil
+    ) else {
+        throw _lastWindowsError()
+    }
+    defer { CloseHandle(mapping) }
+
+    let access = DWORD(FILE_MAP_READ | FILE_MAP_WRITE)
+    guard let view = MapViewOfFile(mapping, access, 0, 0, SIZE_T(length)) else {
+        throw _lastWindowsError()
+    }
+    return view
+#else
+#if canImport(Darwin)
+    let flags = MAP_ANON | MAP_PRIVATE
+#else
+    let flags = MAP_ANONYMOUS | MAP_PRIVATE
+#endif
+    let mapFailed = UnsafeMutableRawPointer(bitPattern: -1)
+    let result: UnsafeMutableRawPointer? = mmap(
+        nil, length, PROT_READ | PROT_WRITE, flags, -1, 0
+    )
+    guard let result, _fastPath(result != mapFailed) else {
+        throw _currentSystemError()
+    }
+    return result
+#endif
+}
+
+/// Makes a mapping from ``_anonymousMemoryMap(length:)`` read-only.
+internal func _memoryProtectReadOnly(
+    _ pointer: UnsafeMutableRawPointer,
+    length: Int
+) throws {
+#if os(Windows)
+    var previous: DWORD = 0
+    guard VirtualProtect(pointer, SIZE_T(length), DWORD(PAGE_READONLY), &previous) else {
+        throw _lastWindowsError()
+    }
+#elseif os(WASI)
+    // WASI has no memory protection.
+#else
+    guard mprotect(pointer, length, PROT_READ) == 0 else {
+        throw _currentSystemError()
+    }
+#endif
+}
+
+/// Releases a mapping made by ``_memoryMap(fileDescriptor:length:isWritable:)``
+/// or ``_anonymousMemoryMap(length:)``.
 internal func _memoryUnmap(_ pointer: UnsafeMutableRawPointer, length: Int) {
 #if os(Windows)
     UnmapViewOfFile(pointer)
